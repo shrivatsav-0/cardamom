@@ -353,11 +353,11 @@ fun CameraPreview(
 }
 
 @Composable
-fun CardFrameOverlay(step: Int, liveCode: String?, isDocument: Boolean = false, isSteady: Boolean = false, modifier: Modifier = Modifier) {
+fun CardFrameOverlay(step: Int, liveCode: String?, isDocument: Boolean = false, modifier: Modifier = Modifier) {
     BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.Center) {
         val cardWidth = if (isDocument) maxWidth * 0.85f else maxWidth * 0.90f
         val cardHeight = if (isDocument) cardWidth * 1.35f else cardWidth / 1.586f
-        val isDetected = liveCode != null || (isDocument && isSteady)
+        val isDetected = !isDocument && liveCode != null
         val borderColor = if (isDetected) Color(0xFFA8D8B4) else Color.White
         val bracketDefaultColor = C.Yellow
 
@@ -387,19 +387,18 @@ fun CardFrameOverlay(step: Int, liveCode: String?, isDocument: Boolean = false, 
             if (isDocument) {
                 val bracketLen = 32f
                 val bracketW = 7f
-                val bracketColor = if (isDetected) Color(0xFFA8D8B4) else bracketDefaultColor
                 // Top-Left corner
-                drawLine(bracketColor, Offset(left, top + 16f), Offset(left, top + 16f + bracketLen), bracketW, StrokeCap.Round)
-                drawLine(bracketColor, Offset(left + 16f, top), Offset(left + 16f + bracketLen, top), bracketW, StrokeCap.Round)
+                drawLine(bracketDefaultColor, Offset(left, top + 16f), Offset(left, top + 16f + bracketLen), bracketW, StrokeCap.Round)
+                drawLine(bracketDefaultColor, Offset(left + 16f, top), Offset(left + 16f + bracketLen, top), bracketW, StrokeCap.Round)
                 // Top-Right corner
-                drawLine(bracketColor, Offset(left + cw, top + 16f), Offset(left + cw, top + 16f + bracketLen), bracketW, StrokeCap.Round)
-                drawLine(bracketColor, Offset(left + cw - 16f, top), Offset(left + cw - 16f - bracketLen, top), bracketW, StrokeCap.Round)
+                drawLine(bracketDefaultColor, Offset(left + cw, top + 16f), Offset(left + cw, top + 16f + bracketLen), bracketW, StrokeCap.Round)
+                drawLine(bracketDefaultColor, Offset(left + cw - 16f, top), Offset(left + cw - 16f - bracketLen, top), bracketW, StrokeCap.Round)
                 // Bottom-Left corner
-                drawLine(bracketColor, Offset(left, top + ch - 16f), Offset(left, top + ch - 16f - bracketLen), bracketW, StrokeCap.Round)
-                drawLine(bracketColor, Offset(left + 16f, top + ch), Offset(left + 16f + bracketLen, top + ch), bracketW, StrokeCap.Round)
+                drawLine(bracketDefaultColor, Offset(left, top + ch - 16f), Offset(left, top + ch - 16f - bracketLen), bracketW, StrokeCap.Round)
+                drawLine(bracketDefaultColor, Offset(left + 16f, top + ch), Offset(left + 16f + bracketLen, top + ch), bracketW, StrokeCap.Round)
                 // Bottom-Right corner
-                drawLine(bracketColor, Offset(left + cw, top + ch - 16f), Offset(left + cw, top + ch - 16f - bracketLen), bracketW, StrokeCap.Round)
-                drawLine(bracketColor, Offset(left + cw - 16f, top + ch), Offset(left + cw - 16f - bracketLen, top + ch), bracketW, StrokeCap.Round)
+                drawLine(bracketDefaultColor, Offset(left + cw, top + ch - 16f), Offset(left + cw, top + ch - 16f - bracketLen), bracketW, StrokeCap.Round)
+                drawLine(bracketDefaultColor, Offset(left + cw - 16f, top + ch), Offset(left + cw - 16f - bracketLen, top + ch), bracketW, StrokeCap.Round)
             }
         }
 
@@ -410,12 +409,7 @@ fun CardFrameOverlay(step: Int, liveCode: String?, isDocument: Boolean = false, 
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                text = if (isDocument) {
-                    if (isDetected) "Document aligned · Hold steady" else "Align document inside frame"
-                } else {
-                    if (isDetected) "Barcode detected" else "Align the card inside the frame"
-                },
-                color = if (isDetected) Color(0xFFA8D8B4) else Color.White,
+                text = if (isDocument) "Align document inside frame" else if (isDetected) "Barcode detected" else "Align the card inside the frame",
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Medium,
             )
@@ -445,8 +439,6 @@ fun ScanScreen(
     var previewViewRef by remember { mutableStateOf<PreviewView?>(null) }
     var cameraRef by remember { mutableStateOf<Camera?>(null) }
     var torchOn by remember { mutableStateOf(false) }
-    var autoCapture by remember { mutableStateOf(true) }
-    var steadyProgress by remember { mutableFloatStateOf(0f) }
     var isCapturing by remember { mutableStateOf(false) }
 
     fun cropCardFrame(): Bitmap? {
@@ -459,31 +451,6 @@ fun ScanScreen(
         val safeW = minOf(targetW, full.width - left)
         val safeH = minOf(targetH, full.height - top)
         return Bitmap.createBitmap(full, left, top, safeW, safeH)
-    }
-
-    // Auto-capture timer for document scanning mode
-    LaunchedEffect(isDocument, autoCapture, granted) {
-        if (isDocument && autoCapture && granted && !isCapturing) {
-            steadyProgress = 0f
-            while (true) {
-                kotlinx.coroutines.delay(100)
-                if (previewViewRef?.bitmap != null && !isCapturing) {
-                    steadyProgress += 0.08f
-                    if (steadyProgress >= 1f) {
-                        isCapturing = true
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        val b = cropCardFrame()
-                        if (b != null) {
-                            vm.importTwoWay(b, null, isDocument = true, onDone = onImported)
-                        } else {
-                            isCapturing = false
-                            steadyProgress = 0f
-                        }
-                        break
-                    }
-                }
-            }
-        }
     }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 8.dp)) {
@@ -538,7 +505,6 @@ fun ScanScreen(
                     step = step,
                     liveCode = liveCode,
                     isDocument = isDocument,
-                    isSteady = steadyProgress >= 0.5f,
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
@@ -551,17 +517,6 @@ fun ScanScreen(
         }
         Spacer(Modifier.height(16.dp))
         if (isDocument) {
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(C.Surface)
-                    .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Choice("Auto-snap", autoCapture, onClick = { autoCapture = true }, modifier = Modifier.padding(horizontal = 12.dp))
-                Choice("Manual", !autoCapture, onClick = { autoCapture = false }, modifier = Modifier.padding(horizontal = 12.dp))
-            }
-            Spacer(Modifier.height(10.dp))
             PrimaryButton(if (isCapturing) "Processing..." else "Capture Document", enabled = !isCapturing, onClick = {
                 isCapturing = true
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)

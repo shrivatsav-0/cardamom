@@ -157,23 +157,6 @@ fun DocumentTile(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Black circle with white initial letter
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFF161616)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = doc.title.ifBlank { doc.docType }.trim().take(1).uppercase().ifEmpty { "D" },
-                    color = Color.White,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-
-            Spacer(Modifier.width(14.dp))
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
