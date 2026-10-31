@@ -44,9 +44,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
-import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
-import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
-import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -294,63 +291,6 @@ fun DocumentScanScreen(
     val scope = rememberCoroutineScope()
     val act = ctx.findActivity()
 
-    // Google Play Services Document Scanner Launcher
-    val scannerLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartIntentSenderForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val scanningResult = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
-            if (scanningResult != null) {
-                scope.launch {
-                    vm.busyText = "Saving scanned document"
-                    try {
-                        val id = UUID.randomUUID().toString()
-                        val docDir = Files.dir(ctx, "documents")
-                        val pagePaths = mutableListOf<String>()
-
-                        // Save JPEG pages
-                        scanningResult.pages?.forEachIndexed { index, page ->
-                            val pageFile = File(docDir, "doc_${id}_page_${index + 1}.jpg")
-                            ctx.contentResolver.openInputStream(page.imageUri)?.use { input ->
-                                pageFile.outputStream().use { output -> input.copyTo(output) }
-                            }
-                            pagePaths.add(pageFile.absolutePath)
-                        }
-
-                        // Save compiled PDF if available
-                        var savedPdfPath: String? = null
-                        scanningResult.pdf?.let { pdf ->
-                            val pdfFile = File(docDir, "doc_$id.pdf")
-                            ctx.contentResolver.openInputStream(pdf.uri)?.use { input ->
-                                pdfFile.outputStream().use { output -> input.copyTo(output) }
-                            }
-                            savedPdfPath = pdfFile.absolutePath
-                        }
-
-                        val primaryPath = savedPdfPath ?: pagePaths.firstOrNull() ?: ""
-                        val file = File(primaryPath)
-                        val doc = WalletDocument(
-                            id = id,
-                            title = "",
-                            docType = "",
-                            uriPath = primaryPath,
-                            mimeType = if (primaryPath.endsWith(".pdf", ignoreCase = true)) "application/pdf" else "image/jpeg",
-                            pageCount = pagePaths.size.coerceAtLeast(1),
-                            pagePaths = pagePaths,
-                            pdfPath = savedPdfPath,
-                            fileSize = file.length(),
-                        )
-                        vm.draftDoc = doc
-                        onScanned()
-                    } catch (e: Exception) {
-                        Toast.makeText(ctx, "Failed to save document: ${e.message}", Toast.LENGTH_SHORT).show()
-                    } finally {
-                        vm.busyText = null
-                    }
-                }
-            }
-        }
-    }
 
     // PDF file picker
     val pdfPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -479,32 +419,7 @@ fun DocumentScanScreen(
                 .clip(RoundedCornerShape(24.dp))
                 .background(Color(0xFFCFE0CC))
                 .clickable {
-                    if (act != null) {
-                        try {
-                            val options = GmsDocumentScannerOptions.Builder()
-                                .setGalleryImportAllowed(true)
-                                .setPageLimit(20)
-                                .setResultFormats(
-                                    GmsDocumentScannerOptions.RESULT_FORMAT_JPEG,
-                                    GmsDocumentScannerOptions.RESULT_FORMAT_PDF,
-                                )
-                                .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
-                                .build()
-
-                            val scanner = GmsDocumentScanning.getClient(options)
-                            scanner.getStartScanIntent(act)
-                                .addOnSuccessListener { intentSender ->
-                                    scannerLauncher.launch(IntentSenderRequest.Builder(intentSender).build())
-                                }
-                                .addOnFailureListener {
-                                    onScanWithCamera()
-                                }
-                        } catch (e: Exception) {
-                            onScanWithCamera()
-                        }
-                    } else {
-                        onScanWithCamera()
-                    }
+                    onScanWithCamera()
                 }
                 .padding(20.dp),
         ) {

@@ -12,10 +12,6 @@
 -keep class com.google.android.gms.vision.** { *; }
 -dontwarn com.google.mlkit.**
 
-# Google Play Services Document Scanner
--keep class com.google.mlkit.vision.documentscanner.** { *; }
--dontwarn com.google.mlkit.vision.documentscanner.**
-
 # ZXing Core
 -keep class com.google.zxing.** { *; }
 -dontwarn com.google.zxing.**

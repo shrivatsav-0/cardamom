@@ -114,7 +114,6 @@ dependencies {
 
   implementation("com.google.mlkit:barcode-scanning:17.3.0")
   implementation("com.google.mlkit:text-recognition:16.0.1")
-  implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0-beta1")
   implementation("com.google.zxing:core:3.5.3")
 
   implementation("androidx.navigation:navigation-compose:2.8.9")

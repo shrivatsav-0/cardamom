@@ -18,6 +18,7 @@ import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.core.Camera
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -31,6 +32,9 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.FlashOff
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
@@ -306,6 +310,7 @@ fun WalletScreen(
 fun CameraPreview(
     onPreviewViewReady: (PreviewView) -> Unit,
     onBarcodeDetected: ((String, Int) -> Unit)? = null,
+    onCameraReady: ((Camera) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val ctx = LocalContext.current
@@ -335,7 +340,8 @@ fun CameraPreview(
                     .addOnCompleteListener { proxy.close() }
             }
             p.unbindAll()
-            p.bindToLifecycle(owner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
+            val camera = p.bindToLifecycle(owner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
+            onCameraReady?.invoke(camera)
         }, ContextCompat.getMainExecutor(ctx))
         onDispose {
             provider?.unbindAll()
@@ -347,12 +353,13 @@ fun CameraPreview(
 }
 
 @Composable
-fun CardFrameOverlay(step: Int, liveCode: String?, isDocument: Boolean = false, modifier: Modifier = Modifier) {
+fun CardFrameOverlay(step: Int, liveCode: String?, isDocument: Boolean = false, isSteady: Boolean = false, modifier: Modifier = Modifier) {
     BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.Center) {
         val cardWidth = if (isDocument) maxWidth * 0.85f else maxWidth * 0.90f
         val cardHeight = if (isDocument) cardWidth * 1.35f else cardWidth / 1.586f
-        val isDetected = liveCode != null
+        val isDetected = liveCode != null || (isDocument && isSteady)
         val borderColor = if (isDetected) Color(0xFFA8D8B4) else Color.White
+        val bracketDefaultColor = C.Yellow
 
         Canvas(Modifier.fillMaxSize()) {
             val cw = cardWidth.toPx()
@@ -374,8 +381,26 @@ fun CardFrameOverlay(step: Int, liveCode: String?, isDocument: Boolean = false, 
                 topLeft = Offset(left, top),
                 size = Size(cw, ch),
                 cornerRadius = CornerRadius(24f, 24f),
-                style = Stroke(width = 4f),
+                style = Stroke(width = if (isDetected) 6f else 4f),
             )
+
+            if (isDocument) {
+                val bracketLen = 32f
+                val bracketW = 7f
+                val bracketColor = if (isDetected) Color(0xFFA8D8B4) else bracketDefaultColor
+                // Top-Left corner
+                drawLine(bracketColor, Offset(left, top + 16f), Offset(left, top + 16f + bracketLen), bracketW, StrokeCap.Round)
+                drawLine(bracketColor, Offset(left + 16f, top), Offset(left + 16f + bracketLen, top), bracketW, StrokeCap.Round)
+                // Top-Right corner
+                drawLine(bracketColor, Offset(left + cw, top + 16f), Offset(left + cw, top + 16f + bracketLen), bracketW, StrokeCap.Round)
+                drawLine(bracketColor, Offset(left + cw - 16f, top), Offset(left + cw - 16f - bracketLen, top), bracketW, StrokeCap.Round)
+                // Bottom-Left corner
+                drawLine(bracketColor, Offset(left, top + ch - 16f), Offset(left, top + ch - 16f - bracketLen), bracketW, StrokeCap.Round)
+                drawLine(bracketColor, Offset(left + 16f, top + ch), Offset(left + 16f + bracketLen, top + ch), bracketW, StrokeCap.Round)
+                // Bottom-Right corner
+                drawLine(bracketColor, Offset(left + cw, top + ch - 16f), Offset(left + cw, top + ch - 16f - bracketLen), bracketW, StrokeCap.Round)
+                drawLine(bracketColor, Offset(left + cw - 16f, top + ch), Offset(left + cw - 16f - bracketLen, top + ch), bracketW, StrokeCap.Round)
+            }
         }
 
         Column(
@@ -385,7 +410,11 @@ fun CardFrameOverlay(step: Int, liveCode: String?, isDocument: Boolean = false, 
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                text = if (isDetected) "Barcode detected" else if (isDocument) "Align document inside the frame" else "Align the card inside the frame",
+                text = if (isDocument) {
+                    if (isDetected) "Document aligned · Hold steady" else "Align document inside frame"
+                } else {
+                    if (isDetected) "Barcode detected" else "Align the card inside the frame"
+                },
                 color = if (isDetected) Color(0xFFA8D8B4) else Color.White,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Medium,
@@ -414,6 +443,11 @@ fun ScanScreen(
     var frontBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var liveCode by remember { mutableStateOf<String?>(null) }
     var previewViewRef by remember { mutableStateOf<PreviewView?>(null) }
+    var cameraRef by remember { mutableStateOf<Camera?>(null) }
+    var torchOn by remember { mutableStateOf(false) }
+    var autoCapture by remember { mutableStateOf(true) }
+    var steadyProgress by remember { mutableFloatStateOf(0f) }
+    var isCapturing by remember { mutableStateOf(false) }
 
     fun cropCardFrame(): Bitmap? {
         val pv = previewViewRef ?: return null
@@ -425,6 +459,31 @@ fun ScanScreen(
         val safeW = minOf(targetW, full.width - left)
         val safeH = minOf(targetH, full.height - top)
         return Bitmap.createBitmap(full, left, top, safeW, safeH)
+    }
+
+    // Auto-capture timer for document scanning mode
+    LaunchedEffect(isDocument, autoCapture, granted) {
+        if (isDocument && autoCapture && granted && !isCapturing) {
+            steadyProgress = 0f
+            while (true) {
+                kotlinx.coroutines.delay(100)
+                if (previewViewRef?.bitmap != null && !isCapturing) {
+                    steadyProgress += 0.08f
+                    if (steadyProgress >= 1f) {
+                        isCapturing = true
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        val b = cropCardFrame()
+                        if (b != null) {
+                            vm.importTwoWay(b, null, isDocument = true, onDone = onImported)
+                        } else {
+                            isCapturing = false
+                            steadyProgress = 0f
+                        }
+                        break
+                    }
+                }
+            }
+        }
     }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 8.dp)) {
@@ -455,7 +514,14 @@ fun ScanScreen(
                     Text("Position document inside frame", color = muted, fontSize = 13.sp)
                 }
             }
-            Spacer(Modifier.size(44.dp))
+            CircleIcon(
+                if (torchOn) Icons.Default.FlashOn else Icons.Default.FlashOff,
+                "Flashlight",
+                onClick = {
+                    torchOn = !torchOn
+                    cameraRef?.cameraControl?.enableTorch(torchOn)
+                },
+            )
         }
         Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 12.dp).clip(RoundedCornerShape(28.dp)).background(Color(0xFF0E0E0E))) {
             if (granted) {
@@ -465,9 +531,16 @@ fun ScanScreen(
                         if (liveCode == null) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         liveCode = "${CodeFormat.fromMl(format).label}: $code"
                     },
+                    onCameraReady = { cameraRef = it },
                     modifier = Modifier.fillMaxSize(),
                 )
-                CardFrameOverlay(step = step, liveCode = liveCode, isDocument = isDocument, modifier = Modifier.fillMaxSize())
+                CardFrameOverlay(
+                    step = step,
+                    liveCode = liveCode,
+                    isDocument = isDocument,
+                    isSteady = steadyProgress >= 0.5f,
+                    modifier = Modifier.fillMaxSize(),
+                )
             } else {
                 Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                     Text("Camera access is needed to scan", textAlign = TextAlign.Center, fontSize = 17.sp)
@@ -478,11 +551,25 @@ fun ScanScreen(
         }
         Spacer(Modifier.height(16.dp))
         if (isDocument) {
-            PrimaryButton("Capture Document", onClick = {
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(C.Surface)
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Choice("Auto-snap", autoCapture, onClick = { autoCapture = true }, modifier = Modifier.padding(horizontal = 12.dp))
+                Choice("Manual", !autoCapture, onClick = { autoCapture = false }, modifier = Modifier.padding(horizontal = 12.dp))
+            }
+            Spacer(Modifier.height(10.dp))
+            PrimaryButton(if (isCapturing) "Processing..." else "Capture Document", enabled = !isCapturing, onClick = {
+                isCapturing = true
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 val b = cropCardFrame()
                 if (b != null) {
                     vm.importTwoWay(b, null, isDocument = true, onDone = onImported)
+                } else {
+                    isCapturing = false
                 }
             })
             Spacer(Modifier.height(10.dp))
