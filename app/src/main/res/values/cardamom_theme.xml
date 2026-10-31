@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="cardamom_bg">#161616</color>
+    <style name="Theme.Cardamom" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/cardamom_bg</item>
+        <item name="android:colorBackground">@color/cardamom_bg</item>
+        <item name="android:fontFamily">@font/google_sans_flex</item>
+        <item name="fontFamily">@font/google_sans_flex</item>
+    </style>
+</resources>
