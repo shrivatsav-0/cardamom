@@ -203,8 +203,21 @@ class Prefs(ctx: Context) {
         get() = sp.getBoolean("screen_security", false)
         set(v) { sp.edit().putBoolean("screen_security", v).apply() }
     var quickActions: Set<String>
-        get() = sp.getStringSet("quick_actions", setOf("delete", "edit", "share")) ?: setOf("delete", "edit", "share")
-        set(v) { sp.edit().putStringSet("quick_actions", v).apply() }
+        get() {
+            val saved = sp.getStringSet("quick_actions", null)
+            return if (saved != null) {
+                if (!sp.contains("quick_actions_v2")) {
+                    val updated = saved + "pin"
+                    sp.edit().putBoolean("quick_actions_v2", true).putStringSet("quick_actions", updated).apply()
+                    updated
+                } else saved
+            } else {
+                setOf("pin", "edit", "share", "delete")
+            }
+        }
+        set(v) {
+            sp.edit().putBoolean("quick_actions_v2", true).putStringSet("quick_actions", v).apply()
+        }
 }
 
 /** Backup / card-file format: JSON, optionally encrypted with a password (PBKDF2 + AES-GCM). */

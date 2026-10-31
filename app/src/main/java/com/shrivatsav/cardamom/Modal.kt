@@ -77,7 +77,7 @@ fun CardamomModal(
                     indication = null,
                     onClick = onDismiss,
                 )
-                .background(Color.Black.copy(alpha = 0.65f))
+                .background(Color.Black.copy(alpha = 0.60f))
                 .systemBarsPadding()
                 .imePadding()
                 .padding(horizontal = 16.dp, vertical = 20.dp),
@@ -92,14 +92,7 @@ fun CardamomModal(
                         indication = null,
                         onClick = {},
                     )
-                    .shadow(
-                        elevation = 20.dp,
-                        shape = RoundedCornerShape(28.dp),
-                        ambientColor = Color.Black.copy(alpha = 0.5f),
-                        spotColor = Color.Black.copy(alpha = 0.5f),
-                    )
-                    .clip(RoundedCornerShape(28.dp))
-                    .border(1.5.dp, modalBorder, RoundedCornerShape(28.dp)),
+                    .clip(RoundedCornerShape(28.dp)),
                 color = modalBg,
                 contentColor = textPrimary,
                 tonalElevation = 0.dp,
@@ -319,7 +312,7 @@ fun CardamomLinkModal(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(18.dp))
                 .background(if (isDark) Color(0xFF242427) else Color(0xFFF5F3EC))
-                .border(1.dp, if (isDark) Color(0xFF38383C) else Color(0xFFE2DDD5), RoundedCornerShape(18.dp))
+
                 .padding(16.dp),
         ) {
             Text(
@@ -353,29 +346,18 @@ fun ItemPreviewToolbarModal(
 ) {
     val isDark = LocalCardamomPalette.current.isDark
     val toolbarBg = if (isDark) Color(0xFF242426) else Color(0xFFFFFFFF)
-    val toolbarBorder = if (isDark) Color(0xFF3E3E42) else Color(0xFFE4DFD5)
 
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
-        val view = LocalView.current
-        SideEffect {
-            if (Build.VERSION.SDK_INT >= 31) {
-                val window = (view.parent as? DialogWindowProvider)?.window
-                window?.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
-                window?.attributes = window?.attributes?.apply {
-                    blurBehindRadius = 32
-                }
-            }
-        }
         ProvideTextStyle(TextStyle(fontFamily = GoogleSansFlexFamily)) {
             Box(Modifier.fillMaxSize()) {
-                // Darkened backdrop scrim that dismisses on click
+                // Dimmed backdrop scrim (no blur) that dismisses on click
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.65f))
+                        .background(Color.Black.copy(alpha = 0.60f))
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
@@ -383,7 +365,7 @@ fun ItemPreviewToolbarModal(
                         ),
                 )
 
-                // Centered sharp preview and icon-only toolbar
+                // Centered flat preview and icon-only toolbar
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -401,27 +383,21 @@ fun ItemPreviewToolbarModal(
                                 onClick = {},
                             ),
                     ) {
-                        // Card or Document Preview at top (sharp, elevated)
+                        // Card or Document Preview at top (flat and clean, no border)
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .shadow(
-                                    elevation = 24.dp,
-                                    shape = RoundedCornerShape(28.dp),
-                                    spotColor = Color.Black.copy(alpha = 0.6f),
-                                ),
+                                .clip(RoundedCornerShape(28.dp)),
                         ) {
                             content()
                         }
 
                         Spacer(Modifier.height(18.dp))
 
-                        // Floating Toolbar directly below the preview: icons only, no labels
+                        // Floating Toolbar directly below the preview: flat, no outlines, icons only
                         Surface(
                             shape = RoundedCornerShape(28.dp),
                             color = toolbarBg,
-                            shadowElevation = 16.dp,
-                            border = BorderStroke(1.dp, toolbarBorder),
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -429,11 +405,11 @@ fun ItemPreviewToolbarModal(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 val allActions = listOf(
-                                    "delete" to ("Delete" to Icons.Default.Delete),
+                                    "pin" to ((if (isPinned) "Unpin" else "Pin") to Icons.Default.PushPin),
                                     "edit" to ("Edit" to Icons.Default.Edit),
                                     "share" to ("Share" to Icons.Default.Share),
-                                    "pin" to ((if (isPinned) "Unpin" else "Pin") to Icons.Default.PushPin),
                                     "details" to ("Details" to Icons.Default.Visibility),
+                                    "delete" to ("Delete" to Icons.Default.Delete),
                                 )
 
                                 allActions.filter { actions.contains(it.first) }.forEach { (id, pair) ->
@@ -442,7 +418,8 @@ fun ItemPreviewToolbarModal(
                                     val isPin = id == "pin"
                                     val tint = when {
                                         isDelete -> C.Danger
-                                        isPin -> C.Yellow
+                                        isPin && isPinned -> C.Yellow
+                                        isPin && !isPinned -> if (isDark) Color(0xFFF5F5F7) else Color(0xFF161616)
                                         isDark -> Color(0xFFF5F5F7)
                                         else -> Color(0xFF161616)
                                     }
