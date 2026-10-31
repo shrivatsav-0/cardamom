@@ -347,10 +347,10 @@ fun CameraPreview(
 }
 
 @Composable
-fun CardFrameOverlay(step: Int, liveCode: String?, modifier: Modifier = Modifier) {
+fun CardFrameOverlay(step: Int, liveCode: String?, isDocument: Boolean = false, modifier: Modifier = Modifier) {
     BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.Center) {
-        val cardWidth = maxWidth * 0.90f
-        val cardHeight = cardWidth / 1.586f
+        val cardWidth = if (isDocument) maxWidth * 0.85f else maxWidth * 0.90f
+        val cardHeight = if (isDocument) cardWidth * 1.35f else cardWidth / 1.586f
         val isDetected = liveCode != null
         val borderColor = if (isDetected) Color(0xFFA8D8B4) else Color.White
 
@@ -385,7 +385,7 @@ fun CardFrameOverlay(step: Int, liveCode: String?, modifier: Modifier = Modifier
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                text = if (isDetected) "Barcode detected" else "Align the card inside the frame",
+                text = if (isDetected) "Barcode detected" else if (isDocument) "Align document inside the frame" else "Align the card inside the frame",
                 color = if (isDetected) Color(0xFFA8D8B4) else Color.White,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Medium,
@@ -418,8 +418,8 @@ fun ScanScreen(
     fun cropCardFrame(): Bitmap? {
         val pv = previewViewRef ?: return null
         val full = pv.bitmap ?: return null
-        val targetW = (full.width * 0.90f).toInt().coerceAtLeast(10)
-        val targetH = (targetW / 1.586f).toInt().coerceAtLeast(10)
+        val targetW = (if (isDocument) full.width * 0.85f else full.width * 0.90f).toInt().coerceAtLeast(10)
+        val targetH = (if (isDocument) targetW * 1.35f else targetW / 1.586f).toInt().coerceAtLeast(10)
         val left = ((full.width - targetW) / 2).coerceAtLeast(0)
         val top = ((full.height - targetH) / 2).coerceAtLeast(0)
         val safeW = minOf(targetW, full.width - left)
@@ -438,18 +438,22 @@ fun ScanScreen(
             val yellow = C.Yellow
             val muted = C.Muted
             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Scan card", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                Text(
-                    text = buildAnnotatedString {
-                        withStyle(SpanStyle(color = yellow, fontWeight = FontWeight.SemiBold)) {
-                            append(if (step == 1) "Step 1 of 2" else "Step 2 of 2")
-                        }
-                        withStyle(SpanStyle(color = muted)) {
-                            append(if (step == 1) " · Front" else " · Back")
-                        }
-                    },
-                    fontSize = 13.sp,
-                )
+                Text(if (isDocument) "Scan document" else "Scan card", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                if (!isDocument) {
+                    Text(
+                        text = buildAnnotatedString {
+                            withStyle(SpanStyle(color = yellow, fontWeight = FontWeight.SemiBold)) {
+                                append(if (step == 1) "Step 1 of 2" else "Step 2 of 2")
+                            }
+                            withStyle(SpanStyle(color = muted)) {
+                                append(if (step == 1) " · Front" else " · Back")
+                            }
+                        },
+                        fontSize = 13.sp,
+                    )
+                } else {
+                    Text("Position document inside frame", color = muted, fontSize = 13.sp)
+                }
             }
             Spacer(Modifier.size(44.dp))
         }
@@ -463,7 +467,7 @@ fun ScanScreen(
                     },
                     modifier = Modifier.fillMaxSize(),
                 )
-                CardFrameOverlay(step = step, liveCode = liveCode, modifier = Modifier.fillMaxSize())
+                CardFrameOverlay(step = step, liveCode = liveCode, isDocument = isDocument, modifier = Modifier.fillMaxSize())
             } else {
                 Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                     Text("Camera access is needed to scan", textAlign = TextAlign.Center, fontSize = 17.sp)
@@ -473,7 +477,20 @@ fun ScanScreen(
             }
         }
         Spacer(Modifier.height(16.dp))
-        if (step == 1) {
+        if (isDocument) {
+            PrimaryButton("Capture Document", onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                val b = cropCardFrame()
+                if (b != null) {
+                    vm.importTwoWay(b, null, isDocument = true, onDone = onImported)
+                }
+            })
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                SecondaryButton("Photo", onClick = { vm.external(); photo.launch("image/*") }, modifier = Modifier.weight(1f))
+                SecondaryButton("PDF or file", onClick = { vm.external(); file.launch(arrayOf("application/pdf", "image/*")) }, modifier = Modifier.weight(1f))
+            }
+        } else if (step == 1) {
             PrimaryButton("Capture Front", onClick = {
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 val b = cropCardFrame()
@@ -506,7 +523,6 @@ fun ScanScreen(
                 }, modifier = Modifier.weight(1f))
             }
         }
-        Spacer(Modifier.height(8.dp))
     }
 }
 

@@ -151,6 +151,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val d = withContext(Dispatchers.Default) { Importer.analyze(getApplication<Application>(), uri) }
                 detected = d
                 draft = d.card.copy(isDocument = isDocument)
+                if (isDocument) {
+                    draftDoc = WalletDocument(
+                        id = d.card.id,
+                        title = d.card.name.ifBlank { "Document" },
+                        docType = "Document",
+                        issuer = d.card.issuer,
+                        uriPath = d.card.frontImagePath ?: "",
+                        mimeType = "image/jpeg",
+                        pageCount = 1,
+                        pagePaths = listOfNotNull(d.card.frontImagePath),
+                        fields = d.card.fields,
+                    )
+                }
                 onDone()
             } catch (e: Exception) {
                 android.widget.Toast.makeText(getApplication<Application>(), "Couldn't read that file", android.widget.Toast.LENGTH_SHORT).show()
@@ -169,6 +182,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 detected = d
                 draft = d.card.copy(isDocument = isDocument)
+                if (isDocument) {
+                    draftDoc = WalletDocument(
+                        id = d.card.id,
+                        title = d.card.name.ifBlank { "Scanned document" },
+                        docType = "Document",
+                        issuer = d.card.issuer,
+                        uriPath = d.card.frontImagePath ?: "",
+                        mimeType = "image/jpeg",
+                        pageCount = 1,
+                        pagePaths = listOfNotNull(d.card.frontImagePath),
+                        fields = d.card.fields,
+                    )
+                }
                 onDone()
             } catch (e: Exception) {
                 android.widget.Toast.makeText(getApplication<Application>(), "Failed to read: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()

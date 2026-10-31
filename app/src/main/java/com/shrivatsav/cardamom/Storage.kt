@@ -19,20 +19,47 @@ import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
 /** AES-GCM with a key that lives in the Android Keystore. */
-class SecureStore {
+class SecureStore(private val ctx: Context? = null) {
     private val alias = "cardamom_key"
+    private var fallbackKey: SecretKey? = null
 
     private fun key(): SecretKey {
-        val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        (ks.getKey(alias, null) as? SecretKey)?.let { return it }
-        val kg = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
-        kg.init(
-            KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .setKeySize(256).build()
-        )
-        return kg.generateKey()
+        return try {
+            val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            (ks.getKey(alias, null) as? SecretKey) ?: run {
+                val kg = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+                kg.init(
+                    KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                        .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                        .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                        .setKeySize(256).build()
+                )
+                kg.generateKey()
+            }
+        } catch (e: Exception) {
+            getFallbackKey()
+        }
+    }
+
+    private fun getFallbackKey(): SecretKey {
+        fallbackKey?.let { return it }
+        val fKey = if (ctx != null) {
+            val keyFile = File(ctx.filesDir, ".secure_seed")
+            val bytes = if (keyFile.exists() && keyFile.length() == 32L) {
+                keyFile.readBytes()
+            } else {
+                val b = ByteArray(32)
+                SecureRandom().nextBytes(b)
+                try { keyFile.writeBytes(b) } catch (e: Exception) {}
+                b
+            }
+            SecretKeySpec(bytes, "AES")
+        } else {
+            val b = "CardamomLocalSecureKeySeed32Byte".toByteArray(Charsets.UTF_8).copyOf(32)
+            SecretKeySpec(b, "AES")
+        }
+        fallbackKey = fKey
+        return fKey
     }
 
     fun encrypt(plain: ByteArray): ByteArray {
@@ -49,7 +76,7 @@ class SecureStore {
 }
 
 class CardRepository(private val ctx: Context) {
-    private val store = SecureStore()
+    private val store = SecureStore(ctx)
     private val file = File(ctx.filesDir, "cards.bin")
     private val _cards = MutableStateFlow(load())
     val cards: StateFlow<List<WalletCard>> = _cards
@@ -93,7 +120,7 @@ class CardRepository(private val ctx: Context) {
 }
 
 class DocumentRepository(private val ctx: Context) {
-    private val store = SecureStore()
+    private val store = SecureStore(ctx)
     private val file = File(ctx.filesDir, "documents.bin")
     private val _documents = MutableStateFlow(load())
     val documents: StateFlow<List<WalletDocument>> = _documents

@@ -130,7 +130,13 @@ fun AppRoot(vm: AppViewModel) {
                     arguments = listOf(navArgument("doc") { type = NavType.BoolType; defaultValue = false }),
                 ) { e ->
                     val isDoc = e.arguments?.getBoolean("doc") ?: false
-                    ScanScreen(vm, isDocument = isDoc, onBack = { nav.popBackStack() }, onCode = { nav.navigate("edit/new") }, onImported = { nav.navigate("review") })
+                    ScanScreen(
+                        vm = vm,
+                        isDocument = isDoc,
+                        onBack = { nav.popBackStack() },
+                        onCode = { nav.navigate(if (isDoc) "doc_upload" else "edit/new") },
+                        onImported = { nav.navigate(if (isDoc) "doc_upload" else "review") },
+                    )
                 }
                 composable("review") { ReviewScreen(vm, onBack = { nav.popBackStack() }, onNext = { nav.navigate("edit/new") }) }
                 composable("edit/{id}", arguments = idArg) { e ->
@@ -161,6 +167,7 @@ fun AppRoot(vm: AppViewModel) {
                     DocumentScanScreen(
                         vm = vm,
                         onBack = { nav.popBackStack() },
+                        onScanWithCamera = { nav.navigate("scan?doc=true") },
                         onScanned = {
                             nav.navigate("doc_upload")
                         },

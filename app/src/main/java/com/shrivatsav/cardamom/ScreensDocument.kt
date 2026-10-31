@@ -114,7 +114,8 @@ fun getDocumentPdfPages(doc: WalletDocument): List<Bitmap> {
             val scale = minOf(1200f / page.width.coerceAtLeast(1), 2f).coerceAtLeast(1f)
             val w = (page.width * scale).toInt()
             val h = (page.height * scale).toInt()
-            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.RGB_565)
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            bmp.eraseColor(android.graphics.Color.WHITE)
             val canvas = android.graphics.Canvas(bmp)
             canvas.drawColor(android.graphics.Color.WHITE)
             page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
@@ -286,6 +287,7 @@ fun DocumentTile(
 fun DocumentScanScreen(
     vm: AppViewModel,
     onBack: () -> Unit,
+    onScanWithCamera: () -> Unit = {},
     onScanned: () -> Unit,
 ) {
     val ctx = LocalContext.current
@@ -375,7 +377,8 @@ fun DocumentScanScreen(
                                 for (i in 0 until renderLimit) {
                                     val page = renderer.openPage(i)
                                     val scale = minOf(1200f / page.width.coerceAtLeast(1), 2f).coerceAtLeast(1f)
-                                    val bmp = Bitmap.createBitmap((page.width * scale).toInt(), (page.height * scale).toInt(), Bitmap.Config.RGB_565)
+                                    val bmp = Bitmap.createBitmap((page.width * scale).toInt(), (page.height * scale).toInt(), Bitmap.Config.ARGB_8888)
+                                    bmp.eraseColor(android.graphics.Color.WHITE)
                                     val canvas = android.graphics.Canvas(bmp)
                                     canvas.drawColor(android.graphics.Color.WHITE)
                                     page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
@@ -393,8 +396,8 @@ fun DocumentScanScreen(
                     }
                     val doc = WalletDocument(
                         id = id,
-                        title = fileName.ifBlank { "" },
-                        docType = "",
+                        title = fileName.ifBlank { "Document" },
+                        docType = "Document",
                         uriPath = dest.absolutePath,
                         mimeType = "application/pdf",
                         pageCount = pageCount.coerceAtLeast(1),
@@ -429,8 +432,8 @@ fun DocumentScanScreen(
                     }
                     val doc = WalletDocument(
                         id = id,
-                        title = "",
-                        docType = "",
+                        title = "Photo document",
+                        docType = "Document",
                         uriPath = dest.absolutePath,
                         mimeType = "image/jpeg",
                         pageCount = 1,
@@ -494,11 +497,13 @@ fun DocumentScanScreen(
                                     scannerLauncher.launch(IntentSenderRequest.Builder(intentSender).build())
                                 }
                                 .addOnFailureListener {
-                                    Toast.makeText(ctx, "Document scanner unavailable: ${it.message}", Toast.LENGTH_SHORT).show()
+                                    onScanWithCamera()
                                 }
                         } catch (e: Exception) {
-                            Toast.makeText(ctx, "Error starting scanner: ${e.message}", Toast.LENGTH_SHORT).show()
+                            onScanWithCamera()
                         }
+                    } else {
+                        onScanWithCamera()
                     }
                 }
                 .padding(20.dp),
@@ -622,8 +627,8 @@ fun DocumentUploadScreen(
         return
     }
 
-    var title by remember { mutableStateOf(draft.title.ifBlank { "" }) }
-    var docType by remember { mutableStateOf(draft.docType.ifBlank { "" }) }
+    var title by remember { mutableStateOf(draft.title.ifBlank { "Document" }) }
+    var docType by remember { mutableStateOf(draft.docType.ifBlank { "Document" }) }
     var issuer by remember { mutableStateOf(draft.issuer) }
     var typeModal by remember { mutableStateOf(false) }
     var isDirectEdit by remember { mutableStateOf(false) }
@@ -650,7 +655,8 @@ fun DocumentUploadScreen(
                 val renderer = PdfRenderer(pfd)
                 val page = renderer.openPage(0)
                 val scale = minOf(600f / page.width.coerceAtLeast(1), 2f).coerceAtLeast(1f)
-                val bmp = Bitmap.createBitmap((page.width * scale).toInt(), (page.height * scale).toInt(), Bitmap.Config.RGB_565)
+                val bmp = Bitmap.createBitmap((page.width * scale).toInt(), (page.height * scale).toInt(), Bitmap.Config.ARGB_8888)
+                bmp.eraseColor(android.graphics.Color.WHITE)
                 val canvas = android.graphics.Canvas(bmp)
                 canvas.drawColor(android.graphics.Color.WHITE)
                 page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
