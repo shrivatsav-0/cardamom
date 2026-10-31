@@ -370,96 +370,100 @@ fun ItemPreviewToolbarModal(
             }
         }
         ProvideTextStyle(TextStyle(fontFamily = GoogleSansFlexFamily)) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.65f))
-                    .blur(16.dp)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = onDismiss,
-                    )
-                    .padding(horizontal = 24.dp, vertical = 32.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
+            Box(Modifier.fillMaxSize()) {
+                // Darkened backdrop scrim that dismisses on click
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.65f))
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
-                            onClick = {},
+                            onClick = onDismiss,
                         ),
+                )
+
+                // Centered sharp preview and icon-only toolbar
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 24.dp, vertical = 32.dp),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    // Card or Document Preview at top
-                    Box(
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .shadow(
-                                elevation = 24.dp,
-                                shape = RoundedCornerShape(28.dp),
-                                spotColor = Color.Black.copy(alpha = 0.6f),
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = {},
                             ),
                     ) {
-                        content()
-                    }
-
-                    Spacer(Modifier.height(20.dp))
-
-                    // Floating Toolbar directly below the preview
-                    Surface(
-                        shape = RoundedCornerShape(24.dp),
-                        color = toolbarBg,
-                        shadowElevation = 16.dp,
-                        border = BorderStroke(1.dp, toolbarBorder),
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                        // Card or Document Preview at top (sharp, elevated)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .shadow(
+                                    elevation = 24.dp,
+                                    shape = RoundedCornerShape(28.dp),
+                                    spotColor = Color.Black.copy(alpha = 0.6f),
+                                ),
                         ) {
-                            val allActions = listOf(
-                                "delete" to ("Delete" to Icons.Default.Delete),
-                                "edit" to ("Edit" to Icons.Default.Edit),
-                                "share" to ("Share" to Icons.Default.Share),
-                                "pin" to ((if (isPinned) "Unpin" else "Pin") to Icons.Default.PushPin),
-                                "details" to ("Details" to Icons.Default.Visibility),
-                            )
+                            content()
+                        }
 
-                            allActions.filter { actions.contains(it.first) }.forEach { (id, pair) ->
-                                val (label, icon) = pair
-                                val isDelete = id == "delete"
-                                val isPin = id == "pin"
-                                val tint = when {
-                                    isDelete -> C.Danger
-                                    isPin -> C.Yellow
-                                    isDark -> Color(0xFFF5F5F7)
-                                    else -> Color(0xFF161616)
-                                }
+                        Spacer(Modifier.height(18.dp))
 
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.Center,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .clickable {
-                                            onAction(id)
-                                            onDismiss()
-                                        }
-                                        .padding(horizontal = 14.dp, vertical = 8.dp),
-                                ) {
-                                    Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(22.dp))
-                                    Spacer(Modifier.height(4.dp))
-                                    Text(
-                                        text = label,
-                                        color = tint,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        maxLines = 1,
-                                    )
+                        // Floating Toolbar directly below the preview: icons only, no labels
+                        Surface(
+                            shape = RoundedCornerShape(28.dp),
+                            color = toolbarBg,
+                            shadowElevation = 16.dp,
+                            border = BorderStroke(1.dp, toolbarBorder),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                val allActions = listOf(
+                                    "delete" to ("Delete" to Icons.Default.Delete),
+                                    "edit" to ("Edit" to Icons.Default.Edit),
+                                    "share" to ("Share" to Icons.Default.Share),
+                                    "pin" to ((if (isPinned) "Unpin" else "Pin") to Icons.Default.PushPin),
+                                    "details" to ("Details" to Icons.Default.Visibility),
+                                )
+
+                                allActions.filter { actions.contains(it.first) }.forEach { (id, pair) ->
+                                    val (label, icon) = pair
+                                    val isDelete = id == "delete"
+                                    val isPin = id == "pin"
+                                    val tint = when {
+                                        isDelete -> C.Danger
+                                        isPin -> C.Yellow
+                                        isDark -> Color(0xFFF5F5F7)
+                                        else -> Color(0xFF161616)
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .size(46.dp)
+                                            .clip(CircleShape)
+                                            .clickable {
+                                                onAction(id)
+                                                onDismiss()
+                                            },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            imageVector = icon,
+                                            contentDescription = label,
+                                            tint = tint,
+                                            modifier = Modifier.size(22.dp),
+                                        )
+                                    }
                                 }
                             }
                         }
