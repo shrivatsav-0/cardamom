@@ -6,11 +6,22 @@ import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import android.os.Build
+import android.view.WindowManager
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.ui.draw.blur
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -20,6 +31,7 @@ import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -328,5 +340,132 @@ fun CardamomLinkModal(
             },
         )
         Spacer(Modifier.height(4.dp))
+    }
+}
+
+@Composable
+fun ItemPreviewToolbarModal(
+    onDismiss: () -> Unit,
+    actions: Set<String>,
+    onAction: (String) -> Unit,
+    isPinned: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    val isDark = LocalCardamomPalette.current.isDark
+    val toolbarBg = if (isDark) Color(0xFF242426) else Color(0xFFFFFFFF)
+    val toolbarBorder = if (isDark) Color(0xFF3E3E42) else Color(0xFFE4DFD5)
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        val view = LocalView.current
+        SideEffect {
+            if (Build.VERSION.SDK_INT >= 31) {
+                val window = (view.parent as? DialogWindowProvider)?.window
+                window?.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                window?.attributes = window?.attributes?.apply {
+                    blurBehindRadius = 32
+                }
+            }
+        }
+        ProvideTextStyle(TextStyle(fontFamily = GoogleSansFlexFamily)) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.65f))
+                    .blur(16.dp)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onDismiss,
+                    )
+                    .padding(horizontal = 24.dp, vertical = 32.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = {},
+                        ),
+                ) {
+                    // Card or Document Preview at top
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .shadow(
+                                elevation = 24.dp,
+                                shape = RoundedCornerShape(28.dp),
+                                spotColor = Color.Black.copy(alpha = 0.6f),
+                            ),
+                    ) {
+                        content()
+                    }
+
+                    Spacer(Modifier.height(20.dp))
+
+                    // Floating Toolbar directly below the preview
+                    Surface(
+                        shape = RoundedCornerShape(24.dp),
+                        color = toolbarBg,
+                        shadowElevation = 16.dp,
+                        border = BorderStroke(1.dp, toolbarBorder),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            val allActions = listOf(
+                                "delete" to ("Delete" to Icons.Default.Delete),
+                                "edit" to ("Edit" to Icons.Default.Edit),
+                                "share" to ("Share" to Icons.Default.Share),
+                                "pin" to ((if (isPinned) "Unpin" else "Pin") to Icons.Default.PushPin),
+                                "details" to ("Details" to Icons.Default.Visibility),
+                            )
+
+                            allActions.filter { actions.contains(it.first) }.forEach { (id, pair) ->
+                                val (label, icon) = pair
+                                val isDelete = id == "delete"
+                                val isPin = id == "pin"
+                                val tint = when {
+                                    isDelete -> C.Danger
+                                    isPin -> C.Yellow
+                                    isDark -> Color(0xFFF5F5F7)
+                                    else -> Color(0xFF161616)
+                                }
+
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .clickable {
+                                            onAction(id)
+                                            onDismiss()
+                                        }
+                                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                                ) {
+                                    Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(22.dp))
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = label,
+                                        color = tint,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

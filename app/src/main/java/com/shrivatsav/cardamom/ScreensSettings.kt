@@ -28,6 +28,7 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit, onBackup: () -> Unit) {
     var newName by remember { mutableStateOf("") }
     var themeDialog by remember { mutableStateOf(false) }
     var lockTimeoutDialog by remember { mutableStateOf(false) }
+    var quickActionsDialog by remember { mutableStateOf(false) }
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             val saved = Files.saveUserAvatar(ctx, uri)
@@ -95,6 +96,10 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit, onBackup: () -> Unit) {
             }
             Sep()
             Row2("Card illustrations") { AppSwitch(vm.illustrations) { vm.updateIllustrations(it) } }
+            Sep()
+            Row2("Floating quick actions", onClick = { quickActionsDialog = true }) {
+                MutedText("${vm.quickActions.size} active")
+            }
         }
         GroupTitle("Data")
         Group {
@@ -195,6 +200,43 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit, onBackup: () -> Unit) {
             },
             onDismiss = { lockTimeoutDialog = false },
         )
+    }
+    if (quickActionsDialog) {
+        CardamomModal(
+            onDismiss = { quickActionsDialog = false },
+            title = "Floating quick actions",
+            subtitle = "Customise the actions shown when long-pressing a card or document",
+        ) {
+            listOf(
+                "delete" to ("Delete" to "Remove card or document from wallet"),
+                "edit" to ("Edit" to "Open editor directly"),
+                "share" to ("Share" to "Export image, file, or send"),
+                "pin" to ("Pin / Unpin" to "Toggle pin status on home screen"),
+                "details" to ("View details" to "Open full detail viewer"),
+            ).forEach { (id, info) ->
+                val (title, sub) = info
+                val isChecked = vm.quickActions.contains(id)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable { vm.toggleQuickAction(id) }
+                        .padding(vertical = 10.dp, horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(title, fontSize = 16.sp, fontWeight = FontWeight.Medium, color = C.Cream)
+                        Text(sub, fontSize = 13.sp, color = C.Muted)
+                    }
+                    AppSwitch(checked = isChecked, onChange = { vm.toggleQuickAction(id) })
+                }
+                Spacer(Modifier.height(4.dp))
+            }
+            Spacer(Modifier.height(16.dp))
+            PrimaryButton("Done", onClick = { quickActionsDialog = false })
+            Spacer(Modifier.height(8.dp))
+        }
     }
 }
 

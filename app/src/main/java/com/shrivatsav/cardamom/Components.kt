@@ -5,6 +5,8 @@ import androidx.compose.ui.platform.LocalContext
 import android.graphics.BitmapFactory
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.*
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -617,12 +619,31 @@ fun CardFieldsRow(card: WalletCard) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun CardTile(card: WalletCard, expanded: Boolean, art: Boolean, modifier: Modifier = Modifier, showCodeText: Boolean = true, onClick: (() -> Unit)? = null) {
+fun CardTile(
+    card: WalletCard,
+    expanded: Boolean,
+    art: Boolean,
+    modifier: Modifier = Modifier,
+    showCodeText: Boolean = true,
+    onClick: (() -> Unit)? = null,
+    onLongClick: (() -> Unit)? = null,
+) {
     val bg = C.CardColors[card.colorIndex.mod(C.CardColors.size)]
     Box(
-        modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(bg)
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(28.dp))
+            .background(bg)
+            .then(
+                if (onClick != null || onLongClick != null) {
+                    Modifier.combinedClickable(
+                        onClick = { onClick?.invoke() },
+                        onLongClick = onLongClick,
+                    )
+                } else Modifier
+            )
     ) {
         if (art) Illustration(card.seed, Modifier.matchParentSize())
         Column(Modifier.padding(18.dp)) {

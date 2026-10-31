@@ -119,6 +119,9 @@ fun AppRoot(vm: AppViewModel) {
                         onAddDocument = { nav.navigate("scan_doc") },
                         onOpenCard = { nav.navigate("detail/$it") },
                         onOpenDoc = { nav.navigate("doc_detail/$it") },
+                        onEditCard = { nav.navigate("edit/$it") },
+                        onShareCard = { nav.navigate("share/$it") },
+                        onEditDoc = { nav.navigate("doc_edit/$it") },
                         onSettings = { nav.navigate("settings") },
                     )
                 }

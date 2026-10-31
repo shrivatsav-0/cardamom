@@ -14,6 +14,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
@@ -128,12 +130,14 @@ fun getDocumentPdfPages(doc: WalletDocument): List<Bitmap> {
 }
 
 // ---------------- Document Tile for Home Screen ----------------
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun DocumentTile(
     doc: WalletDocument,
     expanded: Boolean = false,
     onToggleExpand: () -> Unit,
     onViewDetails: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val colors = listOf(C.Sage, C.Orange, C.Mint, C.Purple, C.Pink)
@@ -150,7 +154,10 @@ fun DocumentTile(
             .fillMaxWidth()
             .clip(RoundedCornerShape(26.dp))
             .background(bg)
-            .clickable(onClick = onToggleExpand)
+            .combinedClickable(
+                onClick = onToggleExpand,
+                onLongClick = onLongClick,
+            )
             .padding(18.dp),
     ) {
         Row(

@@ -1,5 +1,8 @@
 package com.shrivatsav.cardamom
 
+import java.io.File
+import androidx.core.content.FileProvider
+import android.content.Intent
 import android.graphics.Bitmap
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -75,14 +78,21 @@ fun WalletScreen(
     onAddDocument: () -> Unit,
     onOpenCard: (String) -> Unit,
     onOpenDoc: (String) -> Unit,
+    onEditCard: (String) -> Unit = {},
+    onShareCard: (String) -> Unit = {},
+    onEditDoc: (String) -> Unit = {},
     onSettings: () -> Unit,
 ) {
+    val ctx = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     val cards by vm.cards.collectAsState()
     val documents by vm.documents.collectAsState()
     val selectedTab = vm.homeTab
     var q by remember { mutableStateOf("") }
     var expandedCardId by remember { mutableStateOf<String?>(null) }
     var expandedDocId by remember { mutableStateOf<String?>(null) }
+    var activeCardToolbar by remember { mutableStateOf<WalletCard?>(null) }
+    var activeDocToolbar by remember { mutableStateOf<WalletDocument?>(null) }
 
     val pinnedCard = remember(cards, vm.pinnedCardId) {
         cards.firstOrNull { it.id == vm.pinnedCardId }
@@ -214,15 +224,28 @@ fun WalletScreen(
                                                 if (pinnedCardExpanded) onOpenCard(pinnedCard.id) else expandedCardId = pinnedCard.id
                                             }
                                         },
+                                        onLongClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            activeCardToolbar = pinnedCard
+                                        },
                                     )
                                 }
                             }
                         }
                         items(otherCards, key = { it.id }) { c ->
                             val open = expandedCardId == c.id
-                            CardTile(c, expanded = open, art = vm.illustrations, onClick = {
-                                if (open) onOpenCard(c.id) else expandedCardId = c.id
-                            })
+                            CardTile(
+                                card = c,
+                                expanded = open,
+                                art = vm.illustrations,
+                                onClick = {
+                                    if (open) onOpenCard(c.id) else expandedCardId = c.id
+                                },
+                                onLongClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    activeCardToolbar = c
+                                },
+                            )
                         }
                     }
                 }
@@ -277,6 +300,10 @@ fun WalletScreen(
                                             else expandedDocId = if (pinnedDocExpanded) null else pinnedDoc.id
                                         },
                                         onViewDetails = { onOpenDoc(pinnedDoc.id) },
+                                        onLongClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            activeDocToolbar = pinnedDoc
+                                        },
                                     )
                                 }
                             }
@@ -288,6 +315,10 @@ fun WalletScreen(
                                 expanded = open,
                                 onToggleExpand = { expandedDocId = if (open) null else d.id },
                                 onViewDetails = { onOpenDoc(d.id) },
+                                onLongClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    activeDocToolbar = d
+                                },
                             )
                         }
                     }
@@ -300,6 +331,66 @@ fun WalletScreen(
             onClick = if (selectedTab == 0) onAddCard else onAddDocument,
             modifier = Modifier.align(Alignment.BottomCenter).padding(24.dp),
         )
+
+        if (activeCardToolbar != null) {
+            val targetCard = activeCardToolbar!!
+            ItemPreviewToolbarModal(
+                onDismiss = { activeCardToolbar = null },
+                actions = vm.quickActions,
+                isPinned = (vm.pinnedCardId == targetCard.id) || targetCard.isPinned,
+                onAction = { actionId ->
+                    when (actionId) {
+                        "delete" -> vm.delete(targetCard.id)
+                        "edit" -> onEditCard(targetCard.id)
+                        "share" -> onShareCard(targetCard.id)
+                        "pin" -> vm.togglePinCard(targetCard.id)
+                        "details" -> onOpenCard(targetCard.id)
+                    }
+                },
+            ) {
+                CardTile(
+                    card = targetCard,
+                    expanded = true,
+                    art = vm.illustrations,
+                )
+            }
+        }
+
+        if (activeDocToolbar != null) {
+            val targetDoc = activeDocToolbar!!
+            ItemPreviewToolbarModal(
+                onDismiss = { activeDocToolbar = null },
+                actions = vm.quickActions,
+                isPinned = (vm.pinnedDocId == targetDoc.id) || targetDoc.isPinned,
+                onAction = { actionId ->
+                    when (actionId) {
+                        "delete" -> vm.deleteDoc(targetDoc.id)
+                        "edit" -> onEditDoc(targetDoc.id)
+                        "share" -> {
+                            val f = File(targetDoc.uriPath)
+                            if (f.exists()) {
+                                val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", f)
+                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = targetDoc.mimeType
+                                    putExtra(Intent.EXTRA_STREAM, uri)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                ctx.startActivity(Intent.createChooser(shareIntent, "Share document"))
+                            }
+                        }
+                        "pin" -> vm.togglePinDoc(targetDoc.id)
+                        "details" -> onOpenDoc(targetDoc.id)
+                    }
+                },
+            ) {
+                DocumentTile(
+                    doc = targetDoc,
+                    expanded = true,
+                    onToggleExpand = {},
+                    onViewDetails = { onOpenDoc(targetDoc.id) },
+                )
+            }
+        }
     }
 }
 

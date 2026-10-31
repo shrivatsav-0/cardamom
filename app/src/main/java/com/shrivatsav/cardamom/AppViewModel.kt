@@ -38,6 +38,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         LockTimeout.values().firstOrNull { it.seconds == prefs.lockTimeoutSeconds } ?: LockTimeout.IMMEDIATELY
     )
     var screenSecurity by mutableStateOf(prefs.screenSecurity)
+    var quickActions by mutableStateOf(prefs.quickActions)
     private var backgroundTimestamp: Long = 0L
 
     var draft by mutableStateOf<WalletCard?>(null)
@@ -135,6 +136,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun updateScreenSecurity(v: Boolean) {
         screenSecurity = v
         prefs.screenSecurity = v
+    }
+    fun toggleQuickAction(id: String) {
+        val current = quickActions.toMutableSet()
+        if (current.contains(id)) {
+            if (current.size > 1) current.remove(id)
+        } else {
+            current.add(id)
+        }
+        quickActions = current
+        prefs.quickActions = current
     }
 
     fun importCards(list: List<WalletCard>): Int {

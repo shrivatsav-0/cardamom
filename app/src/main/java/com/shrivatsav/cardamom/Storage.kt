@@ -202,6 +202,9 @@ class Prefs(ctx: Context) {
     var screenSecurity: Boolean
         get() = sp.getBoolean("screen_security", false)
         set(v) { sp.edit().putBoolean("screen_security", v).apply() }
+    var quickActions: Set<String>
+        get() = sp.getStringSet("quick_actions", setOf("delete", "edit", "share")) ?: setOf("delete", "edit", "share")
+        set(v) { sp.edit().putStringSet("quick_actions", v).apply() }
 }
 
 /** Backup / card-file format: JSON, optionally encrypted with a password (PBKDF2 + AES-GCM). */
