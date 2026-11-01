@@ -242,7 +242,7 @@ class CardWidgetProvider : AppWidgetProvider() {
             views.setImageViewBitmap(R.id.widget_header_image, createHeaderBitmap(context, titleText, subText))
             views.setContentDescription(R.id.widget_header_image, "$titleText, $subText")
 
-            views.setImageViewBitmap(R.id.widget_btn_next, null) // reset
+            views.setImageViewBitmap(R.id.widget_btn_next, null)
 
             // Generate code preview bitmap
             if (card.code.isNotBlank()) {

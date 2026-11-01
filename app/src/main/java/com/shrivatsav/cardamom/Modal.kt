@@ -353,7 +353,7 @@ fun ItemPreviewToolbarModal(
     ) {
         ProvideTextStyle(TextStyle(fontFamily = GoogleSansFlexFamily)) {
             Box(Modifier.fillMaxSize()) {
-                // Dimmed backdrop scrim (no blur) that dismisses on click
+                // Backdrop scrim that dismisses on click
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -365,7 +365,7 @@ fun ItemPreviewToolbarModal(
                         ),
                 )
 
-                // Centered flat preview and icon-only toolbar
+                // Centered preview and action toolbar
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -383,7 +383,7 @@ fun ItemPreviewToolbarModal(
                                 onClick = {},
                             ),
                     ) {
-                        // Card or Document Preview at top (flat and clean, no border)
+                        // Preview container
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -394,7 +394,7 @@ fun ItemPreviewToolbarModal(
 
                         Spacer(Modifier.height(18.dp))
 
-                        // Floating Toolbar directly below the preview: flat, no outlines, icons only
+                        // Floating quick actions toolbar
                         Surface(
                             shape = RoundedCornerShape(28.dp),
                             color = toolbarBg,

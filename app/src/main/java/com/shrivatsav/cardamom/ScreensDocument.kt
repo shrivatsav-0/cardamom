@@ -353,14 +353,12 @@ fun DocumentScanScreen(
                                 }
                                 renderer.close()
                                 pfd.close()
-                            } catch (e: Exception) {
-                                // PDF page render fallback
-                            }
+                            } catch (_: Exception) {}
                         }
                     }
                     val doc = WalletDocument(
                         id = id,
-                        title = "", // Document title must not be auto-filled; must be filled by user
+                        title = "",
                         docType = "Document",
                         uriPath = dest.absolutePath,
                         mimeType = "application/pdf",

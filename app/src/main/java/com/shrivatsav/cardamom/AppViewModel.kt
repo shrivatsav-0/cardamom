@@ -217,7 +217,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 if (isDocument) {
                     draftDoc = WalletDocument(
                         id = d.card.id,
-                        title = "", // Document title must NOT be auto-filled; must be filled by user
+                        title = "",
                         docType = "Document",
                         issuer = d.card.issuer,
                         uriPath = d.card.frontImagePath ?: "",
@@ -248,7 +248,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 if (isDocument) {
                     draftDoc = WalletDocument(
                         id = d.card.id,
-                        title = "", // Document title must NOT be auto-filled; must be filled by user
+                        title = "",
                         docType = "Document",
                         issuer = d.card.issuer,
                         uriPath = d.card.frontImagePath ?: "",
@@ -295,7 +295,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val totalSize = pagePaths.sumOf { java.io.File(it).length() }
                 draftDoc = WalletDocument(
                     id = id,
-                    title = "", // Document title must be filled by user
+                    title = "",
                     docType = "Document",
                     issuer = issuer,
                     uriPath = pagePaths.firstOrNull() ?: "",
@@ -349,7 +349,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val totalSize = pagePaths.sumOf { java.io.File(it).length() }
                 draftDoc = WalletDocument(
                     id = id,
-                    title = "", // Document title must be filled by user
+                    title = "",
                     docType = "Document",
                     issuer = issuer,
                     uriPath = pagePaths.firstOrNull() ?: "",

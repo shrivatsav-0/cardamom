@@ -313,9 +313,7 @@ object AiModelManager {
             if (dir.exists()) {
                 dir.deleteRecursively()
             }
-        } catch (e: Exception) {
-            // ignore
-        }
+        } catch (_: Exception) {}
         val prefs = Prefs(context)
         prefs.aiModelDownloaded = false
         prefs.aiModelVersion = ""
