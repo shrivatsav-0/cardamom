@@ -18,6 +18,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.Color
 import java.text.DateFormat
 import java.util.Date
 
@@ -29,6 +30,12 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit, onBackup: () -> Unit) {
     var themeDialog by remember { mutableStateOf(false) }
     var lockTimeoutDialog by remember { mutableStateOf(false) }
     var quickActionsDialog by remember { mutableStateOf(false) }
+    var aiModelDialog by remember { mutableStateOf(false) }
+    var confirmDeleteAiModel by remember { mutableStateOf(false) }
+    var ocrEngineDialog by remember { mutableStateOf(false) }
+    var privacyModal by remember { mutableStateOf(false) }
+    var termsModal by remember { mutableStateOf(false) }
+    val aiStatus by vm.aiModelStatus.collectAsState()
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             val saved = Files.saveUserAvatar(ctx, uri)
@@ -101,14 +108,48 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit, onBackup: () -> Unit) {
                 MutedText("${vm.quickActions.size} active")
             }
         }
+        GroupTitle("AI & Recognition")
+        Group {
+            Row2("OCR Engine", onClick = { ocrEngineDialog = true }) {
+                MutedText(vm.currentOcrEngine.displayName)
+            }
+            Sep()
+            Row2("Engine Status") {
+                val statusText = when (vm.currentOcrEngine) {
+                    AppOcrEngine.MLKIT -> "Ready (Default · On-device)"
+                    AppOcrEngine.PADDLE -> if (vm.isAiModelReady) "Ready (Local model)" else "Needs download (Tap to setup)"
+                }
+                Text(
+                    text = statusText,
+                    color = if (vm.currentOcrEngine == AppOcrEngine.MLKIT || vm.isAiModelReady) C.Mint else C.Yellow,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.clickable {
+                        if (vm.currentOcrEngine == AppOcrEngine.PADDLE && !vm.isAiModelReady) {
+                            aiModelDialog = true
+                        }
+                    }
+                )
+            }
+            if (vm.currentOcrEngine == AppOcrEngine.PADDLE) {
+                Sep()
+                Row2("PaddleOCR Package", onClick = { aiModelDialog = true }) {
+                    MutedText(if (vm.isAiModelReady) "Installed (16.8 MB)" else "Not installed (Tap to download)")
+                }
+            }
+        }
         GroupTitle("Data")
         Group {
             Row2("Backup & restore", onClick = onBackup) { MutedText("Open") }
-            Sep()
-            Row2("Fetch logos online") { AppSwitch(vm.fetchLogos) { vm.updateFetchLogos(it) } }
         }
-        GroupTitle("About")
-        Group { Row2("Cardamom") { MutedText("Version 1.0") } }
+        GroupTitle("Legal & About")
+        Group {
+            Row2("Privacy Policy", onClick = { privacyModal = true }) { MutedText("Read") }
+            Sep()
+            Row2("Terms of Service", onClick = { termsModal = true }) { MutedText("Read") }
+            Sep()
+            Row2("Cardamom", onClick = {}) { MutedText("Version 1.0 · Offline First") }
+        }
         Spacer(Modifier.height(24.dp))
     }
 
@@ -236,6 +277,205 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit, onBackup: () -> Unit) {
             Spacer(Modifier.height(16.dp))
             PrimaryButton("Done", onClick = { quickActionsDialog = false })
             Spacer(Modifier.height(8.dp))
+        }
+    }
+    if (aiModelDialog) {
+        val catalog = AiModelManager.catalog
+        val isReady = aiStatus is AiModelStatus.Ready || vm.isAiModelReady
+        val isDownloading = aiStatus is AiModelStatus.Downloading || aiStatus is AiModelStatus.Verifying
+        val isError = aiStatus is AiModelStatus.Error
+
+        CardamomModal(
+            onDismiss = { aiModelDialog = false },
+            title = "On-Device AI Engine",
+            subtitle = "Transcribe photos & auto-fill dynamic fields locally",
+        ) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                Group {
+                    Row(
+                        Modifier.fillMaxWidth().padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(catalog.name, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                            Text("v${catalog.version} • Open Source (${catalog.license})", color = C.Muted, fontSize = 12.sp)
+                        }
+                        Box(
+                            Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(
+                                    when {
+                                        isReady -> C.Mint.copy(alpha = 0.2f)
+                                        isDownloading -> C.Yellow.copy(alpha = 0.2f)
+                                        isError -> C.Danger.copy(alpha = 0.2f)
+                                        else -> Color(0xFF2C2C2C)
+                                    }
+                                )
+                                .padding(horizontal = 10.dp, vertical = 5.dp)
+                        ) {
+                            Text(
+                                text = when {
+                                    isReady -> "✓ Active"
+                                    aiStatus is AiModelStatus.Downloading -> "${((aiStatus as AiModelStatus.Downloading).progress * 100).toInt()}%"
+                                    aiStatus is AiModelStatus.Verifying -> "Verifying"
+                                    isError -> "Error"
+                                    else -> "Not installed"
+                                },
+                                color = when {
+                                    isReady -> C.Mint
+                                    isDownloading -> C.Yellow
+                                    isError -> C.Danger
+                                    else -> C.Muted
+                                },
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                            )
+                        }
+                    }
+
+                    if (isDownloading) {
+                        val s = aiStatus
+                        if (s is AiModelStatus.Downloading) {
+                            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                                LinearProgressIndicator(
+                                    progress = { s.progress },
+                                    modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
+                                    color = C.Yellow,
+                                    trackColor = Color(0xFF2C2C2C),
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    val downloadedMb = s.downloadedBytes / (1024f * 1024f)
+                                    val totalMb = s.totalBytes / (1024f * 1024f)
+                                    val speedMb = s.speedBps / (1024f * 1024f)
+                                    Text(String.format("%.1f MB / %.1f MB", downloadedMb, totalMb), color = C.Muted, fontSize = 12.sp)
+                                    Text(String.format("%.1f MB/s", speedMb), color = C.Yellow, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    "This on-device AI model powers image text transcription and dynamic field extraction (cardholder names, member IDs, expiration dates, loyalty points, tiers, and travel attributes). Everything stays private on your phone.",
+                    color = C.Muted,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                )
+                Spacer(Modifier.height(20.dp))
+
+                if (isReady) {
+                    SecondaryButton("Remove AI model (Free up 15.8 MB)", onClick = {
+                        confirmDeleteAiModel = true
+                    })
+                } else if (isDownloading) {
+                    SecondaryButton("Cancel download", onClick = { vm.cancelAiModelDownload() })
+                } else {
+                    PrimaryButton("Download AI model (15.8 MB)", onClick = { vm.downloadAiModel() })
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+    }
+
+    if (confirmDeleteAiModel) {
+        CardamomConfirmModal(
+            onDismiss = { confirmDeleteAiModel = false },
+            title = "Delete on-device AI model?",
+            message = "Removing the AI model will free 15.8 MB of storage, but automatic OCR and dynamic field filling will be disabled. You will have to pre-fill all fields manually.",
+            confirmText = "Delete model",
+            confirmColor = C.Danger,
+            onConfirm = {
+                vm.deleteAiModel()
+                confirmDeleteAiModel = false
+                Toast.makeText(ctx, "AI model removed", Toast.LENGTH_SHORT).show()
+            },
+        )
+    }
+    if (ocrEngineDialog) {
+        CardamomSelectModal(
+            title = "OCR Engine",
+            subtitle = "Choose text recognition engine for cards and documents",
+            options = AppOcrEngine.values().toList(),
+            selected = vm.currentOcrEngine,
+            optionLabel = { it.displayName },
+            optionDescription = { it.subtitle },
+            onSelect = { selectedEngine ->
+                vm.setOcrEngine(selectedEngine)
+                ocrEngineDialog = false
+                if (selectedEngine == AppOcrEngine.PADDLE && !vm.isAiModelReady) {
+                    aiModelDialog = true
+                }
+            },
+            onDismiss = { ocrEngineDialog = false },
+        )
+    }
+
+    if (privacyModal) {
+        CardamomModal(
+            onDismiss = { privacyModal = false },
+            title = "Privacy Policy",
+            subtitle = "Zero tracking. Local encryption. Your data stays on your phone.",
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Text(
+                    text = "Cardamom is designed from the ground up as a private, offline-first digital wallet and document organizer.\n\n" +
+                        "1. Zero Cloud Transmission\n" +
+                        "Your cards, documents, barcodes, images, and personal attributes are stored strictly on your local device. We run zero remote servers, maintain zero analytics, and collect zero telemetry.\n\n" +
+                        "2. Hardware-Backed Encryption\n" +
+                        "All vault data is encrypted using AES-256-GCM with keys managed by the hardware-backed Android Keystore. Encrypted records cannot be accessed outside the authenticated application context.\n\n" +
+                        "3. On-Device AI & OCR\n" +
+                        "All document scanning, image transcription, and barcode detection operate 100% on your device using on-device ML Kit and local models. No camera frames or images ever leave your device.\n\n" +
+                        "4. Backups & Portability\n" +
+                        "When you export a backup, the encrypted payload is encrypted with PBKDF2-SHA256 and AES-GCM using your custom password. You maintain total custody and sovereignty over your backup files.\n\n" +
+                        "5. Data Deletion\n" +
+                        "Deleting a card, document, or wiping the app permanently removes the plaintext and associated image files from your phone.",
+                    color = C.Cream,
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp,
+                )
+                Spacer(Modifier.height(16.dp))
+                PrimaryButton("Close", onClick = { privacyModal = false })
+            }
+        }
+    }
+
+    if (termsModal) {
+        CardamomModal(
+            onDismiss = { termsModal = false },
+            title = "Terms of Service",
+            subtitle = "Open source, personal wallet software.",
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Text(
+                    text = "Welcome to Cardamom. By using this application, you agree to the following terms:\n\n" +
+                        "1. License & Ownership\n" +
+                        "Cardamom is open-source software provided under the Apache 2.0 license. You are granted the right to run, inspect, and modify the application for personal and non-commercial use.\n\n" +
+                        "2. Personal Custody & Device Security\n" +
+                        "Cardamom is a self-custody wallet. You are solely responsible for securing your physical device, biometric authentication, and backup passwords. The developers cannot recover lost passwords or forgotten credentials.\n\n" +
+                        "3. As-Is Provision\n" +
+                        "The application is provided \"as is\", without warranty of any kind, express or implied. In no event shall the developers be liable for any data loss, device issues, or barcode scanning discrepancies.\n\n" +
+                        "4. Offline Usage\n" +
+                        "Cardamom requires no user account, subscription, or recurring payments to unlock its features.",
+                    color = C.Cream,
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp,
+                )
+                Spacer(Modifier.height(16.dp))
+                PrimaryButton("Close", onClick = { termsModal = false })
+            }
         }
     }
 }

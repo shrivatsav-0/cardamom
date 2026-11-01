@@ -18,6 +18,21 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Check
@@ -229,7 +244,7 @@ fun EditScreen(vm: AppViewModel, id: String, onBack: () -> Unit, onSaved: (Strin
                     card = card.copy(name = card.issuer.ifBlank { if (card.isDocument) "Document" else "Card" })
                 }
                 if (!keepOriginal && card.originalPath != null) {
-                    File(card.originalPath!!).delete()
+                    File(card.originalPath).delete()
                     card = card.copy(originalPath = null, originalName = null, originalMime = null)
                 }
                 if (card.logoMode == LogoMode.AUTO && card.website.isNotBlank() && vm.fetchLogos && card.logoPath == null) {
@@ -335,13 +350,26 @@ fun DetailScreen(vm: AppViewModel, id: String, onBack: () -> Unit, onEdit: () ->
         LaunchedEffect(Unit) { onBack() }
         return
     }
-    var viewMode by remember { mutableStateOf(0) }
+    var viewMode by remember { mutableStateOf(0) } // 0 = Digital card, 1 = Photo / File
+    var isFlipped by remember { mutableStateOf(false) }
+    val cardRotation by animateFloatAsState(
+        targetValue = if (isFlipped) 180f else 0f,
+        animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
+        label = "CardFlipAnimation"
+    )
+    var showBackPhoto by remember { mutableStateOf(false) }
+    var activeViewerPath by remember { mutableStateOf<String?>(null) }
+    var activeViewerName by remember { mutableStateOf<String?>(null) }
+    var activeViewerMime by remember { mutableStateOf<String?>(null) }
+
     val frontBmp = remember(displayCard.frontImagePath) {
         displayCard.frontImagePath?.let { BitmapFactory.decodeFile(it) }
     }
     val backBmp = remember(displayCard.backImagePath) {
         displayCard.backImagePath?.let { BitmapFactory.decodeFile(it) }
     }
+    val hasPhotoOrFile = (frontBmp != null) || (backBmp != null) || (displayCard.originalPath != null)
+
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 8.dp)) {
         TopBar("Card", onBack, trailing = {
             StarButton(
@@ -353,67 +381,277 @@ fun DetailScreen(vm: AppViewModel, id: String, onBack: () -> Unit, onEdit: () ->
             )
         })
         Spacer(Modifier.height(10.dp))
-        if (frontBmp != null) {
+
+        // Exactly 2 tabs: Digital card & Photo / File
+        if (hasPhotoOrFile) {
             Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Choice("Digital card", viewMode == 0, Modifier.weight(1f)) { viewMode = 0 }
-                Choice("Front photo", viewMode == 1, Modifier.weight(1f)) { viewMode = 1 }
-                if (backBmp != null) {
-                    Choice("Back photo", viewMode == 2, Modifier.weight(1f)) { viewMode = 2 }
-                }
+                Choice("Photo / File", viewMode == 1, Modifier.weight(1f)) { viewMode = 1 }
             }
         }
+
         if (viewMode == 0) {
-            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(32.dp)).background(C.CardColors[displayCard.colorIndex.mod(C.CardColors.size)])) {
-                if (vm.illustrations) Illustration(displayCard.seed, Modifier.matchParentSize())
-                Column(Modifier.padding(22.dp)) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            val issuerName = displayCard.issuer.ifBlank { displayCard.name.ifBlank { "Card" } }
-                            Text(
-                                text = issuerName,
-                                color = C.Ink,
-                                fontSize = if (issuerName.contains('\n') || issuerName.length > 24) 20.sp else 24.sp,
-                                lineHeight = 26.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            val subName = when {
-                                displayCard.issuer.isNotBlank() && displayCard.name.isNotBlank() && !displayCard.name.equals(displayCard.issuer, true) -> displayCard.name
-                                else -> displayCard.category
+            val fixedCardHeight = if (displayCard.code.isNotBlank()) 310.dp else 240.dp
+
+            // Digital card with raised right corner + half-exposed circular arrow button underneath on right
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 36.dp, end = 10.dp)
+            ) {
+                // 1. UNDERNEATH ON RIGHT: Circular container arrow button, prominently exposed
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .offset(x = 10.dp, y = 28.dp)
+                        .size(52.dp)
+                        .clip(CircleShape)
+                        .background(C.Yellow)
+                        .border(2.5.dp, C.Bg, CircleShape)
+                        .clickable { isFlipped = !isFlipped },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = if (!isFlipped) Icons.AutoMirrored.Filled.ArrowForward else Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Flip card",
+                        tint = Color(0xFF161616),
+                        modifier = Modifier.size(24.dp),
+                    )
+                }
+
+                // 2. ON TOP: Digital card (raised on the right to reveal the button underneath [card]->)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(fixedCardHeight)
+                        .pointerInput(Unit) {
+                            detectHorizontalDragGestures { _, dragAmount ->
+                                if (dragAmount < -15f) isFlipped = true
+                                else if (dragAmount > 15f) isFlipped = false
                             }
-                            Text(
-                                text = subName,
-                                color = C.Ink.copy(alpha = 0.75f),
-                                fontSize = 14.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                        }
+                        .graphicsLayer {
+                            rotationY = cardRotation
+                            cameraDistance = 14f * density
+                            rotationZ = if (cardRotation <= 90f) -1.2f else 1.2f
+                        }
+                        .clip(RoundedCornerShape(32.dp))
+                        .background(C.CardColors[displayCard.colorIndex.mod(C.CardColors.size)])
+                        .clickable { isFlipped = !isFlipped }
+                ) {
+                    if (vm.illustrations) Illustration(displayCard.seed, Modifier.matchParentSize())
+
+                    if (cardRotation <= 90f) {
+                        // FRONT OF DIGITAL CARD (clean, strictly fills fixedCardHeight)
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(22.dp),
+                            verticalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Column {
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        val primaryTitle = displayCard.name.ifBlank { displayCard.category.ifBlank { displayCard.issuer.ifBlank { "Card" } } }
+                                        Text(
+                                            text = primaryTitle,
+                                            color = C.Ink,
+                                            fontSize = if (primaryTitle.contains('\n') || primaryTitle.length > 24) 20.sp else 24.sp,
+                                            lineHeight = 26.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        val secondaryText = if (displayCard.issuer.isNotBlank() && !displayCard.issuer.equals(primaryTitle, ignoreCase = true)) {
+                                            displayCard.issuer
+                                        } else if (displayCard.name.isNotBlank() && !displayCard.category.equals(primaryTitle, ignoreCase = true)) {
+                                            displayCard.category
+                                        } else ""
+                                        if (secondaryText.isNotBlank()) {
+                                            Text(
+                                                text = secondaryText,
+                                                color = C.Ink.copy(alpha = 0.75f),
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                    }
+                                }
+
+                                if (displayCard.code.isNotBlank()) {
+                                    Spacer(Modifier.height(18.dp))
+                                    CodePanel(displayCard, barHeight = 130.dp, allowCopyModal = true)
+                                }
+
+                                // Front attributes (Name, USN, Course, Branch, Validity)
+                                val frontFields = displayCard.fields.filterNot { f ->
+                                    val l = f.label.lowercase()
+                                    l.contains("dob") || l.contains("birth") || l.contains("blood") || l.contains("address") ||
+                                    l.contains("mobile") || l.contains("phone") || l.contains("contact") || l.contains("emergency") ||
+                                    l.contains("transfer") || l.contains("return")
+                                }
+                                if (frontFields.isNotEmpty()) {
+                                    Spacer(Modifier.height(16.dp))
+                                    CardFieldsRow(displayCard.copy(fields = frontFields))
+                                } else if (displayCard.points.isNotBlank() || displayCard.status.isNotBlank()) {
+                                    Spacer(Modifier.height(16.dp))
+                                    PointsRow(displayCard)
+                                }
+                            }
+                        }
+                    } else {
+                        // BACK OF DIGITAL CARD (clean, mirrored upright, strictly fills fixedCardHeight)
+                        Column(
+                            modifier = Modifier
+                                .graphicsLayer { rotationY = 180f }
+                                .fillMaxSize()
+                                .padding(22.dp),
+                            verticalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Column {
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            text = "CARD DETAILS · BACK",
+                                            color = C.Ink.copy(alpha = 0.7f),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 1.sp,
+                                        )
+                                        val instTitle = displayCard.issuer.ifBlank { displayCard.name.ifBlank { "Institution" } }
+                                        Text(
+                                            text = instTitle,
+                                            color = C.Ink,
+                                            fontSize = 20.sp,
+                                            lineHeight = 24.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
+                                Spacer(Modifier.height(14.dp))
+
+                                val backFields = displayCard.fields.filter { f ->
+                                    val l = f.label.lowercase()
+                                    l.contains("dob") || l.contains("birth") || l.contains("blood") || l.contains("address") ||
+                                    l.contains("mobile") || l.contains("phone") || l.contains("contact") || l.contains("emergency") ||
+                                    l.contains("transfer") || l.contains("return")
+                                }.ifEmpty {
+                                    if (displayCard.fields.size > 3) displayCard.fields.drop(3) else emptyList()
+                                }
+
+                                if (backFields.isNotEmpty()) {
+                                    backFields.forEachIndexed { idx, f ->
+                                        if (idx > 0) Spacer(Modifier.height(10.dp))
+                                        Column {
+                                            Text(f.label.uppercase(), color = C.Ink.copy(alpha = 0.7f), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+                                            Text(f.value, color = C.Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                                        }
+                                    }
+                                } else {
+                                    Column {
+                                        Text("ISSUED BY", color = C.Ink.copy(alpha = 0.7f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        Text(displayCard.issuer.ifBlank { "Cardamom Private Wallet" }, color = C.Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                        Spacer(Modifier.height(10.dp))
+                                        Text("SECURITY & VALIDITY", color = C.Ink.copy(alpha = 0.7f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        Text("Encrypted locally on device · Offline first", color = C.Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
                         }
                     }
-                    if (displayCard.code.isNotBlank()) {
-                        Spacer(Modifier.height(20.dp))
-                        CodePanel(displayCard, barHeight = 130.dp, allowCopyModal = true)
-                    }
-                    if (displayCard.fields.isNotEmpty()) {
-                        Spacer(Modifier.height(16.dp))
-                        CardFieldsRow(displayCard)
-                    } else if (displayCard.points.isNotBlank() || displayCard.status.isNotBlank()) {
-                        Spacer(Modifier.height(16.dp))
-                        PointsRow(displayCard)
-                    }
-                }
-            }
-        } else if (viewMode == 1) {
-            Box(Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(24.dp)).background(Color(0xFF0E0E0E)), contentAlignment = Alignment.Center) {
-                if (frontBmp != null) {
-                    Image(frontBmp.asImageBitmap(), "Front of card", Modifier.fillMaxSize().padding(6.dp), contentScale = ContentScale.Fit)
                 }
             }
         } else {
-            Box(Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(24.dp)).background(Color(0xFF0E0E0E)), contentAlignment = Alignment.Center) {
-                if (backBmp != null) {
-                    Image(backBmp.asImageBitmap(), "Back of card", Modifier.fillMaxSize().padding(6.dp), contentScale = ContentScale.Fit)
+            // PHOTO / FILE TAB
+            Column(Modifier.fillMaxWidth()) {
+                val hasBothPhotos = (frontBmp != null && backBmp != null)
+                if (hasBothPhotos) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(C.Surface)
+                            .padding(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Choice("Front photo", !showBackPhoto, Modifier.weight(1f)) { showBackPhoto = false }
+                        Choice("Back photo", showBackPhoto, Modifier.weight(1f)) { showBackPhoto = true }
+                    }
+                }
+
+                val currentBmp = if (showBackPhoto && backBmp != null) backBmp else frontBmp
+                val currentPath = if (showBackPhoto && backBmp != null) displayCard.backImagePath else displayCard.frontImagePath
+
+                if (currentBmp != null) {
+                    val isPortrait = currentBmp.height > currentBmp.width
+                    val aspect = (currentBmp.width.toFloat() / currentBmp.height.toFloat()).coerceIn(0.5f, 2.2f)
+
+                    Box(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = (if (isPortrait) Modifier.fillMaxWidth(0.72f) else Modifier.fillMaxWidth())
+                                .aspectRatio(aspect)
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(Color(0xFF141414))
+                                .border(1.dp, C.Outline.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                                .clickable {
+                                    currentPath?.let { path ->
+                                        activeViewerPath = path
+                                        activeViewerName = if (showBackPhoto) "Back photo" else "Front photo"
+                                        activeViewerMime = "image/jpeg"
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Image(
+                                bitmap = currentBmp.asImageBitmap(),
+                                contentDescription = "Card Photo",
+                                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(20.dp)),
+                                contentScale = ContentScale.Fit,
+                                filterQuality = FilterQuality.High,
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "Tap photo to view full size in app",
+                        color = C.Muted,
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                if (displayCard.originalPath != null) {
+                    Spacer(Modifier.height(14.dp))
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(C.Surface)
+                            .clickable {
+                                activeViewerPath = displayCard.originalPath
+                                activeViewerName = displayCard.originalName ?: "Original file"
+                                activeViewerMime = displayCard.originalMime
+                            }
+                            .padding(horizontal = 18.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Default.Visibility, contentDescription = null, tint = C.Yellow, modifier = Modifier.size(24.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Original file", fontSize = 16.sp, maxLines = 1)
+                            Text(displayCard.originalName ?: "View file in app", color = C.Muted, fontSize = 13.sp, maxLines = 1)
+                        }
+                        Text("Open", color = C.Yellow, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
@@ -465,12 +703,12 @@ fun DetailScreen(vm: AppViewModel, id: String, onBack: () -> Unit, onEdit: () ->
             onDismiss = { confirm = false },
         )
     }
-    if (showFileViewer && displayCard.originalPath != null) {
+    if (activeViewerPath != null) {
         InAppFileViewerDialog(
-            filePath = displayCard.originalPath!!,
-            fileName = displayCard.originalName ?: "Original file",
-            mimeType = displayCard.originalMime,
-            onDismiss = { showFileViewer = false },
+            filePath = activeViewerPath!!,
+            fileName = activeViewerName ?: "Card photo",
+            mimeType = activeViewerMime,
+            onDismiss = { activeViewerPath = null },
         )
     }
 }

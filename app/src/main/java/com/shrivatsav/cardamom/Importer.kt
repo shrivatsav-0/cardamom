@@ -34,6 +34,14 @@ data class ExtractedCardData(
     val primaryFormat: CodeFormat,
 )
 
+data class AnalysisOutcome(
+    val issuer: String,
+    val category: String,
+    val fields: List<CardField>,
+    val points: String,
+    val status: String,
+    val details: String,
+)
 /** Everything here runs on the phone: PdfRenderer + ML Kit barcode scanning + ML Kit text recognition + simple rules. */
 object Importer {
 
@@ -43,65 +51,59 @@ object Importer {
         val backPath = backBmp?.let { Files.saveCardSide(ctx, id, "back", it) }
 
         val scanner = BarcodeScanning.getClient()
-        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
         val codes = mutableListOf<Pair<String, CodeFormat>>()
-        val frontText = StringBuilder()
-        val backText = StringBuilder()
-        val frontLines = mutableListOf<String>()
-
         try {
-            // Process front
             val frontImg = InputImage.fromBitmap(frontBmp, 0)
             for (bc in scanner.process(frontImg).await()) {
                 val v = bc.rawValue
                 if (!v.isNullOrBlank() && codes.none { it.first == v }) codes.add(v to CodeFormat.fromMl(bc.format))
             }
-            val frontResult = recognizer.process(frontImg).await()
-            frontText.append(frontResult.text)
-            for (block in frontResult.textBlocks) {
-                for (line in block.lines) {
-                    val t = line.text.trim()
-                    if (t.isNotBlank()) frontLines.add(t)
-                }
-            }
-
-            // Process back if present
             if (backBmp != null) {
                 val backImg = InputImage.fromBitmap(backBmp, 0)
                 for (bc in scanner.process(backImg).await()) {
                     val v = bc.rawValue
                     if (!v.isNullOrBlank() && codes.none { it.first == v }) codes.add(v to CodeFormat.fromMl(bc.format))
                 }
-                val backResult = recognizer.process(backImg).await()
-                backText.append(backResult.text)
             }
         } finally {
             scanner.close()
-            recognizer.close()
         }
 
-        val extracted = extractCardData(frontText.toString(), backText.toString(), frontLines, codes)
-        val details = if (codes.isEmpty()) "No code found" else "${codes.size} code(s) detected"
+        val aiResult = AiVisionEngine.processImage(ctx, frontBmp, backBmp)
 
+        val (issuer, category, fields, points, status, details) = when (aiResult) {
+            is AiVisionResult.Success -> {
+                val info = if (codes.isEmpty()) "${aiResult.dynamicFields.size} field(s) auto-filled by AI"
+                           else "${codes.size} code(s), ${aiResult.dynamicFields.size} field(s) auto-filled"
+                AnalysisOutcome(aiResult.issuer, aiResult.category, aiResult.dynamicFields, aiResult.points, aiResult.status, info)
+            }
+            is AiVisionResult.ModelNotDownloaded -> {
+                val info = if (codes.isEmpty()) "OCR engine unavailable (check Settings)"
+                           else "${codes.size} code(s) detected (OCR engine unavailable for text auto-fill)"
+                AnalysisOutcome("", "Card", emptyList(), "", "", info)
+            }
+        }
+        val firstCode = codes.firstOrNull()
+        val primaryCode = firstCode?.first ?: ""
+        val primaryFormat = firstCode?.second ?: CodeFormat.CODE128
+        val detectedName = fields.firstOrNull { it.label.equals("Name", true) || it.label.equals("Student Name", true) }?.value ?: ""
         val card = WalletCard(
             id = id,
-            name = "",
-            issuer = extracted.issuer,
-            category = "",
-            code = extracted.primaryCode,
-            format = extracted.primaryFormat,
+            name = detectedName,
+            issuer = issuer,
+            category = category,
+            code = primaryCode,
+            format = primaryFormat,
             colorIndex = (0 until C.CardColors.size).random(),
             frontImagePath = frontPath,
             backImagePath = backPath,
-            fields = extracted.fields,
-            points = extracted.fields.firstOrNull { it.label.contains("Point", true) }?.value ?: "",
-            status = extracted.fields.firstOrNull { it.label.contains("Status", true) || it.label.contains("Tier", true) }?.value ?: "",
+            fields = fields,
+            points = points,
+            status = status,
         )
 
-        val frontThumb = Bitmap.createScaledBitmap(frontBmp, 240, (240f * frontBmp.height / frontBmp.width).toInt().coerceAtLeast(1), true)
-        val backThumb = backBmp?.let {
-            Bitmap.createScaledBitmap(it, 240, (240f * it.height / it.width).toInt().coerceAtLeast(1), true)
-        }
+        val frontThumb = frontBmp
+        val backThumb = backBmp
 
         return Detected(card, details, codes, frontThumb, frontThumb, backThumb)
     }
@@ -112,10 +114,7 @@ object Importer {
         val bitmaps = if (mime.contains("pdf")) renderPdf(ctx, uri) else listOfNotNull(decodeImage(ctx, uri))
 
         val codes = mutableListOf<Pair<String, CodeFormat>>()
-        val text = StringBuilder()
-        val lines = mutableListOf<String>()
         val scanner = BarcodeScanning.getClient()
-        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
         try {
             for (b in bitmaps) {
                 val img = InputImage.fromBitmap(b, 0)
@@ -123,44 +122,48 @@ object Importer {
                     val v = bc.rawValue
                     if (!v.isNullOrBlank() && codes.none { it.first == v }) codes.add(v to CodeFormat.fromMl(bc.format))
                 }
-                val result = recognizer.process(img).await()
-                text.append(result.text).append('\n')
-                for (block in result.textBlocks) {
-                    for (line in block.lines) {
-                        val t = line.text.trim()
-                        if (t.isNotBlank()) lines.add(t)
-                    }
-                }
             }
         } finally {
             scanner.close()
-            recognizer.close()
+        }
+
+        val aiResult = AiVisionEngine.processBitmaps(ctx, bitmaps)
+
+        val (issuer, category, fields, points, status, details) = when (aiResult) {
+            is AiVisionResult.Success -> {
+                val info = if (codes.isEmpty()) "${aiResult.dynamicFields.size} field(s) auto-filled by AI"
+                           else "${codes.size} code(s), ${aiResult.dynamicFields.size} field(s) auto-filled"
+                AnalysisOutcome(aiResult.issuer, aiResult.category, aiResult.dynamicFields, aiResult.points, aiResult.status, info)
+            }
+            is AiVisionResult.ModelNotDownloaded -> {
+                val info = if (codes.isEmpty()) "OCR engine unavailable (check Settings)"
+                           else "${codes.size} code(s) detected (OCR engine unavailable for text auto-fill)"
+                AnalysisOutcome("", "Card", emptyList(), "", "", info)
+            }
         }
 
         val copy = Files.copyOriginal(ctx, id, uri)
-        val fileName = copy?.second?.substringBeforeLast('.') ?: "New card"
-        val extracted = extractCardData(text.toString(), "", lines, codes)
-        val details = if (codes.isEmpty()) "No code found" else "${codes.size} code(s) detected"
-
+        val firstCode = codes.firstOrNull()
+        val primaryCode = firstCode?.first ?: ""
+        val primaryFormat = firstCode?.second ?: CodeFormat.CODE128
+        val detectedName = fields.firstOrNull { it.label.equals("Name", true) || it.label.equals("Student Name", true) }?.value ?: ""
         val card = WalletCard(
             id = id,
-            name = "",
-            issuer = extracted.issuer,
-            category = "",
-            code = extracted.primaryCode,
-            format = extracted.primaryFormat,
+            name = detectedName,
+            issuer = issuer,
+            category = category,
+            code = primaryCode,
+            format = primaryFormat,
             colorIndex = (0 until C.CardColors.size).random(),
-            fields = extracted.fields,
-            points = extracted.fields.firstOrNull { it.label.contains("Point", true) }?.value ?: "",
-            status = extracted.fields.firstOrNull { it.label.contains("Status", true) || it.label.contains("Tier", true) }?.value ?: "",
+            fields = fields,
+            points = points,
+            status = status,
             originalPath = copy?.first,
             originalName = copy?.second,
             originalMime = copy?.third,
         )
 
-        val thumb = bitmaps.firstOrNull()?.let {
-            Bitmap.createScaledBitmap(it, 240, (240f * it.height / it.width).toInt().coerceAtLeast(1), true)
-        }
+        val thumb = bitmaps.firstOrNull()
         return Detected(card, details, codes, thumb, thumb, null)
     }
 

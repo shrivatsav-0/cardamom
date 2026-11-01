@@ -24,6 +24,57 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var pinnedDocId by mutableStateOf(prefs.pinnedDocId)
     var keepPinnedExpanded by mutableStateOf(prefs.keepPinnedExpanded)
 
+    init {
+        AiModelManager.initStatus(app)
+    }
+
+    val aiModelStatus = AiModelManager.status
+    val isAiModelReady: Boolean get() = AiModelManager.isModelReady(getApplication())
+    var aiModelSkipped by mutableStateOf(prefs.aiModelSkipped)
+    var pendingUserName by mutableStateOf(prefs.userName)
+    var pendingLock by mutableStateOf(prefs.lockEnabled)
+    var pendingAvatarPath by mutableStateOf(prefs.userAvatarPath)
+    var currentScriptPack by mutableStateOf(ModelScriptPack.fromId(prefs.aiModelScript))
+
+    fun setScriptPack(pack: ModelScriptPack) {
+        currentScriptPack = pack
+        prefs.aiModelScript = pack.id
+    }
+    var currentOcrEngine by mutableStateOf(AppOcrEngine.fromId(prefs.ocrEngine))
+
+    fun setOcrEngine(engine: AppOcrEngine) {
+        currentOcrEngine = engine
+        prefs.ocrEngine = engine.id
+    }
+
+    fun setPendingProfile(name: String, lock: Boolean, avatar: String?) {
+        pendingUserName = name
+        pendingLock = lock
+        pendingAvatarPath = avatar
+        userName = name
+        lockEnabled = lock
+        userAvatarPath = avatar
+    }
+
+    fun skipAiModel() {
+        aiModelSkipped = true
+        prefs.aiModelSkipped = true
+    }
+
+    fun downloadAiModel(simulatedDelay: Boolean = true) {
+        viewModelScope.launch {
+            AiModelManager.downloadModel(getApplication(), simulatedDelay = simulatedDelay)
+        }
+    }
+
+    fun cancelAiModelDownload() {
+        AiModelManager.cancelDownload()
+    }
+
+    fun deleteAiModel() {
+        AiModelManager.deleteModel(getApplication())
+    }
+
 
     var onboarded by mutableStateOf(prefs.onboarded)
     var userName by mutableStateOf(prefs.userName)
@@ -105,8 +156,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         docRepo.saveAll(updated)
     }
 
-    fun finishOnboarding(name: String, lock: Boolean, avatarPath: String? = null) {
-        userName = name; prefs.userName = name
+    fun finishOnboarding(name: String = pendingUserName, lock: Boolean = pendingLock, avatarPath: String? = pendingAvatarPath) {
+        val finalName = name.ifBlank { pendingUserName }
+        userName = finalName; prefs.userName = finalName
         lockEnabled = lock; prefs.lockEnabled = lock
         userAvatarPath = avatarPath; prefs.userAvatarPath = avatarPath
         onboarded = true; prefs.onboarded = true
@@ -165,7 +217,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 if (isDocument) {
                     draftDoc = WalletDocument(
                         id = d.card.id,
-                        title = d.card.name.ifBlank { "Document" },
+                        title = "", // Document title must NOT be auto-filled; must be filled by user
                         docType = "Document",
                         issuer = d.card.issuer,
                         uriPath = d.card.frontImagePath ?: "",
@@ -196,7 +248,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 if (isDocument) {
                     draftDoc = WalletDocument(
                         id = d.card.id,
-                        title = d.card.name.ifBlank { "Scanned document" },
+                        title = "", // Document title must NOT be auto-filled; must be filled by user
                         docType = "Document",
                         issuer = d.card.issuer,
                         uriPath = d.card.frontImagePath ?: "",
@@ -213,5 +265,150 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 busyText = null
             }
         }
+    }
+    fun importDocumentPages(bitmaps: List<android.graphics.Bitmap>, onDone: () -> Unit) {
+        viewModelScope.launch {
+            busyText = "Processing ${bitmaps.size} document page(s)"
+            try {
+                val ctx = getApplication<Application>()
+                val id = java.util.UUID.randomUUID().toString()
+                val docDir = Files.dir(ctx, "documents")
+                val pagePaths = mutableListOf<String>()
+                withContext(Dispatchers.IO) {
+                    bitmaps.forEachIndexed { i, bmp ->
+                        val pageFile = java.io.File(docDir, "doc_${id}_page_$i.jpg")
+                        pageFile.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, it) }
+                        pagePaths.add(pageFile.absolutePath)
+                    }
+                }
+
+                // Recognize with active engine (Google ML Kit on-device by default)
+                val aiResult = withContext(Dispatchers.Default) {
+                    AiVisionEngine.processBitmaps(ctx, bitmaps)
+                }
+
+                val issuer = when (aiResult) {
+                    is AiVisionResult.Success -> aiResult.issuer
+                    else -> ""
+                }
+
+                val totalSize = pagePaths.sumOf { java.io.File(it).length() }
+                draftDoc = WalletDocument(
+                    id = id,
+                    title = "", // Document title must be filled by user
+                    docType = "Document",
+                    issuer = issuer,
+                    uriPath = pagePaths.firstOrNull() ?: "",
+                    mimeType = "image/jpeg",
+                    pageCount = pagePaths.size.coerceAtLeast(1),
+                    pagePaths = pagePaths,
+                    fileSize = totalSize,
+                    fields = emptyList(),
+                )
+                onDone()
+            } catch (e: Exception) {
+                android.widget.Toast.makeText(getApplication<Application>(), "Failed to process pages: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+            } finally {
+                busyText = null
+            }
+        }
+    }
+
+    fun importDocumentUris(uris: List<Uri>, onDone: () -> Unit) {
+        viewModelScope.launch {
+            busyText = "Importing ${uris.size} document photo(s)"
+            try {
+                val ctx = getApplication<Application>()
+                val id = java.util.UUID.randomUUID().toString()
+                val docDir = Files.dir(ctx, "documents")
+                val pagePaths = mutableListOf<String>()
+                val bitmaps = mutableListOf<android.graphics.Bitmap>()
+                withContext(Dispatchers.IO) {
+                    uris.forEachIndexed { index, uri ->
+                        val dest = java.io.File(docDir, "doc_${id}_page_$index.jpg")
+                        ctx.contentResolver.openInputStream(uri)?.use { input ->
+                            dest.outputStream().use { output -> input.copyTo(output) }
+                        }
+                        if (dest.exists() && dest.length() > 0) {
+                            pagePaths.add(dest.absolutePath)
+                            android.graphics.BitmapFactory.decodeFile(dest.absolutePath)?.let { bitmaps.add(it) }
+                        }
+                    }
+                }
+
+                // Recognize with active engine (Google ML Kit on-device by default)
+                val aiResult = withContext(Dispatchers.Default) {
+                    AiVisionEngine.processBitmaps(ctx, bitmaps)
+                }
+
+                val issuer = when (aiResult) {
+                    is AiVisionResult.Success -> aiResult.issuer
+                    else -> ""
+                }
+
+                val totalSize = pagePaths.sumOf { java.io.File(it).length() }
+                draftDoc = WalletDocument(
+                    id = id,
+                    title = "", // Document title must be filled by user
+                    docType = "Document",
+                    issuer = issuer,
+                    uriPath = pagePaths.firstOrNull() ?: "",
+                    mimeType = "image/jpeg",
+                    pageCount = pagePaths.size.coerceAtLeast(1),
+                    pagePaths = pagePaths,
+                    fileSize = totalSize,
+                    fields = emptyList(),
+                )
+                onDone()
+            } catch (e: Exception) {
+                android.widget.Toast.makeText(getApplication<Application>(), "Failed to import photos: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+            } finally {
+                busyText = null
+            }
+        }
+    }
+
+    fun addPagesToDraftDoc(newUris: List<Uri>) {
+        val cur = draftDoc ?: return
+        viewModelScope.launch {
+            val ctx = getApplication<Application>()
+            val docDir = Files.dir(ctx, "documents")
+            val newPaths = mutableListOf<String>()
+            val startIndex = cur.pagePaths.size
+            withContext(Dispatchers.IO) {
+                newUris.forEachIndexed { i, uri ->
+                    val dest = java.io.File(docDir, "doc_${cur.id}_page_${startIndex + i}.jpg")
+                    ctx.contentResolver.openInputStream(uri)?.use { input ->
+                        dest.outputStream().use { output -> input.copyTo(output) }
+                    }
+                    if (dest.exists() && dest.length() > 0) {
+                        newPaths.add(dest.absolutePath)
+                    }
+                }
+            }
+            val updatedPaths = cur.pagePaths + newPaths
+            val totalSize = updatedPaths.sumOf { java.io.File(it).length() }
+            draftDoc = cur.copy(
+                pagePaths = updatedPaths,
+                pageCount = updatedPaths.size,
+                fileSize = totalSize,
+            )
+        }
+    }
+
+    fun removePageFromDraftDoc(index: Int) {
+        val cur = draftDoc ?: return
+        if (index !in cur.pagePaths.indices) return
+        val pathToRemove = cur.pagePaths[index]
+        try { java.io.File(pathToRemove).delete() } catch (e: Exception) {}
+        val updatedPaths = cur.pagePaths.toMutableList().apply { removeAt(index) }
+        val primaryPath = updatedPaths.firstOrNull() ?: ""
+        val totalSize = updatedPaths.sumOf { java.io.File(it).length() }
+        draftDoc = cur.copy(
+            uriPath = primaryPath,
+            pagePaths = updatedPaths,
+            pageCount = updatedPaths.size.coerceAtLeast(1),
+            fileSize = totalSize,
+        )
     }
 }

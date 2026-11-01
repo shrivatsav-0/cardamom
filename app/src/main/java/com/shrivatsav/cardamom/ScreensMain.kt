@@ -35,8 +35,13 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.FlashOff
+import androidx.compose.material.icons.filled.CropPortrait
+import androidx.compose.material.icons.filled.CropLandscape
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.ui.text.buildAnnotatedString
@@ -92,7 +97,9 @@ fun WalletScreen(
     var expandedCardId by remember { mutableStateOf<String?>(null) }
     var expandedDocId by remember { mutableStateOf<String?>(null) }
     var activeCardToolbar by remember { mutableStateOf<WalletCard?>(null) }
+    var cardToDelete by remember { mutableStateOf<WalletCard?>(null) }
     var activeDocToolbar by remember { mutableStateOf<WalletDocument?>(null) }
+    var docToDelete by remember { mutableStateOf<WalletDocument?>(null) }
 
     val pinnedCard = remember(cards, vm.pinnedCardId) {
         cards.firstOrNull { it.id == vm.pinnedCardId }
@@ -340,7 +347,10 @@ fun WalletScreen(
                 isPinned = (vm.pinnedCardId == targetCard.id) || targetCard.isPinned,
                 onAction = { actionId ->
                     when (actionId) {
-                        "delete" -> vm.delete(targetCard.id)
+                        "delete" -> {
+                            cardToDelete = targetCard
+                            activeCardToolbar = null
+                        }
                         "edit" -> onEditCard(targetCard.id)
                         "share" -> onShareCard(targetCard.id)
                         "pin" -> vm.togglePinCard(targetCard.id)
@@ -356,6 +366,22 @@ fun WalletScreen(
             }
         }
 
+        if (cardToDelete != null) {
+            val c = cardToDelete!!
+            CardamomConfirmModal(
+                title = "Delete this card?",
+                message = "This card, its barcode, and any stored photos or files will be permanently removed from this phone.",
+                confirmText = "Delete card",
+                confirmColor = C.Danger,
+                onConfirm = {
+                    val id = c.id
+                    cardToDelete = null
+                    vm.delete(id)
+                },
+                onDismiss = { cardToDelete = null },
+            )
+        }
+
         if (activeDocToolbar != null) {
             val targetDoc = activeDocToolbar!!
             ItemPreviewToolbarModal(
@@ -364,7 +390,10 @@ fun WalletScreen(
                 isPinned = (vm.pinnedDocId == targetDoc.id) || targetDoc.isPinned,
                 onAction = { actionId ->
                     when (actionId) {
-                        "delete" -> vm.deleteDoc(targetDoc.id)
+                        "delete" -> {
+                            docToDelete = targetDoc
+                            activeDocToolbar = null
+                        }
                         "edit" -> onEditDoc(targetDoc.id)
                         "share" -> {
                             val f = File(targetDoc.uriPath)
@@ -390,6 +419,22 @@ fun WalletScreen(
                     onViewDetails = { onOpenDoc(targetDoc.id) },
                 )
             }
+        }
+
+        if (docToDelete != null) {
+            val d = docToDelete!!
+            CardamomConfirmModal(
+                title = "Delete this document?",
+                message = "This document and all its stored pages will be permanently removed from this phone.",
+                confirmText = "Delete document",
+                confirmColor = C.Danger,
+                onConfirm = {
+                    val id = d.id
+                    docToDelete = null
+                    vm.deleteDoc(id)
+                },
+                onDismiss = { docToDelete = null },
+            )
         }
     }
 }
@@ -444,10 +489,10 @@ fun CameraPreview(
 }
 
 @Composable
-fun CardFrameOverlay(step: Int, liveCode: String?, isDocument: Boolean = false, modifier: Modifier = Modifier) {
+fun CardFrameOverlay(step: Int, liveCode: String?, isDocument: Boolean = false, isPortraitCard: Boolean = false, modifier: Modifier = Modifier) {
     BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.Center) {
-        val cardWidth = if (isDocument) maxWidth * 0.85f else maxWidth * 0.90f
-        val cardHeight = if (isDocument) cardWidth * 1.35f else cardWidth / 1.586f
+        val cardWidth = if (isDocument) maxWidth * 0.85f else if (isPortraitCard) maxHeight * 0.60f / 1.586f else maxWidth * 0.90f
+        val cardHeight = if (isDocument) cardWidth * 1.35f else if (isPortraitCard) maxHeight * 0.60f else cardWidth / 1.586f
         val isDetected = !isDocument && liveCode != null
         val borderColor = if (isDetected) Color(0xFFA8D8B4) else Color.White
         val bracketDefaultColor = C.Yellow
@@ -500,9 +545,8 @@ fun CardFrameOverlay(step: Int, liveCode: String?, isDocument: Boolean = false, 
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                text = if (isDocument) "Align document inside frame" else if (isDetected) "Barcode detected" else "Align the card inside the frame",
+                text = if (isDocument) "Align document inside frame" else if (isPortraitCard) "Align portrait ID badge inside frame" else if (isDetected) "Barcode detected" else "Align card inside frame",
                 fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
             )
         }
     }
@@ -523,7 +567,16 @@ fun ScanScreen(
     LaunchedEffect(Unit) { if (!granted) perm.launch(Manifest.permission.CAMERA) }
     val photo = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> if (uri != null) vm.importUri(uri, isDocument = isDocument, onDone = onImported) }
     val file = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) vm.importUri(uri, isDocument = isDocument, onDone = onImported) }
-
+    val docPages = remember { mutableStateListOf<Bitmap>() }
+    val multiPhoto = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+        if (!uris.isNullOrEmpty()) {
+            if (isDocument) {
+                vm.importDocumentUris(uris, onDone = onImported)
+            } else {
+                uris.firstOrNull()?.let { vm.importUri(it, isDocument = false, onDone = onImported) }
+            }
+        }
+    }
     var step by remember { mutableStateOf(1) }
     var frontBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var liveCode by remember { mutableStateOf<String?>(null) }
@@ -531,12 +584,23 @@ fun ScanScreen(
     var cameraRef by remember { mutableStateOf<Camera?>(null) }
     var torchOn by remember { mutableStateOf(false) }
     var isCapturing by remember { mutableStateOf(false) }
+    var isPortraitCard by remember { mutableStateOf(false) }
 
     fun cropCardFrame(): Bitmap? {
         val pv = previewViewRef ?: return null
         val full = pv.bitmap ?: return null
-        val targetW = (if (isDocument) full.width * 0.85f else full.width * 0.90f).toInt().coerceAtLeast(10)
-        val targetH = (if (isDocument) targetW * 1.35f else targetW / 1.586f).toInt().coerceAtLeast(10)
+        val targetW: Int
+        val targetH: Int
+        if (isDocument) {
+            targetW = (full.width * 0.85f).toInt().coerceAtLeast(10)
+            targetH = (targetW * 1.35f).toInt().coerceAtLeast(10)
+        } else if (isPortraitCard) {
+            targetH = (full.height * 0.65f).toInt().coerceAtLeast(10)
+            targetW = (targetH / 1.586f).toInt().coerceAtLeast(10)
+        } else {
+            targetW = (full.width * 0.90f).toInt().coerceAtLeast(10)
+            targetH = (targetW / 1.586f).toInt().coerceAtLeast(10)
+        }
         val left = ((full.width - targetW) / 2).coerceAtLeast(0)
         val top = ((full.height - targetH) / 2).coerceAtLeast(0)
         val safeW = minOf(targetW, full.width - left)
@@ -572,6 +636,14 @@ fun ScanScreen(
                     Text("Position document inside frame", color = muted, fontSize = 13.sp)
                 }
             }
+            if (!isDocument) {
+                CircleIcon(
+                    if (isPortraitCard) Icons.Default.CropPortrait else Icons.Default.CropLandscape,
+                    if (isPortraitCard) "Switch to landscape card" else "Switch to portrait ID badge",
+                    onClick = { isPortraitCard = !isPortraitCard }
+                )
+                Spacer(Modifier.width(8.dp))
+            }
             CircleIcon(
                 if (torchOn) Icons.Default.FlashOn else Icons.Default.FlashOff,
                 "Flashlight",
@@ -596,6 +668,7 @@ fun ScanScreen(
                     step = step,
                     liveCode = liveCode,
                     isDocument = isDocument,
+                    isPortraitCard = isPortraitCard,
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
@@ -608,20 +681,110 @@ fun ScanScreen(
         }
         Spacer(Modifier.height(16.dp))
         if (isDocument) {
-            PrimaryButton(if (isCapturing) "Processing..." else "Capture Document", enabled = !isCapturing, onClick = {
-                isCapturing = true
-                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                val b = cropCardFrame()
-                if (b != null) {
-                    vm.importTwoWay(b, null, isDocument = true, onDone = onImported)
-                } else {
-                    isCapturing = false
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                // Top: Full-width Capture Button
+                Button(
+                    onClick = {
+                        isCapturing = true
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        val b = cropCardFrame()
+                        if (b != null) {
+                            docPages.add(b)
+                        }
+                        isCapturing = false
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = C.Yellow),
+                    enabled = !isCapturing,
+                ) {
+                    Icon(
+                        Icons.Default.CameraAlt,
+                        contentDescription = null,
+                        tint = Color(0xFF161616),
+                        modifier = Modifier.size(22.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = if (docPages.isEmpty()) "Capture Page 1" else "Capture Page ${docPages.size + 1}",
+                        color = Color(0xFF161616),
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
                 }
-            })
-            Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                SecondaryButton("Photo", onClick = { vm.external(); photo.launch("image/*") }, modifier = Modifier.weight(1f))
-                SecondaryButton("PDF or file", onClick = { vm.external(); file.launch(arrayOf("application/pdf", "image/*")) }, modifier = Modifier.weight(1f))
+
+                // Bottom: [ Count ] on left, [ Done ] on right
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // Left: Page Count Box
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(52.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(C.Surface)
+                            .border(1.dp, C.Outline.copy(alpha = 0.5f), RoundedCornerShape(20.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "${docPages.size}",
+                                color = if (docPages.isNotEmpty()) C.Yellow else C.Muted,
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = if (docPages.size == 1) "page captured" else "pages captured",
+                                color = C.Muted,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                            )
+                        }
+                    }
+
+                    // Right: Done Button
+                    Button(
+                        onClick = {
+                            if (docPages.isNotEmpty()) {
+                                isCapturing = true
+                                vm.importDocumentPages(docPages.toList(), onDone = onImported)
+                            }
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(52.dp)
+                            .clip(RoundedCornerShape(20.dp)),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (docPages.isNotEmpty()) Color(0xFF2E7D32) else C.Surface,
+                            disabledContainerColor = C.Surface,
+                        ),
+                        enabled = docPages.isNotEmpty() && !isCapturing,
+                    ) {
+                        Icon(
+                            Icons.Default.Check,
+                            contentDescription = null,
+                            tint = if (docPages.isNotEmpty()) Color.White else C.Muted.copy(alpha = 0.4f),
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = "Done",
+                            color = if (docPages.isNotEmpty()) Color.White else C.Muted.copy(alpha = 0.4f),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
             }
         } else if (step == 1) {
             PrimaryButton("Capture Front", onClick = {
@@ -674,60 +837,114 @@ fun ReviewScreen(vm: AppViewModel, onBack: () -> Unit, onNext: () -> Unit) {
         TopBar("Review card", onBack)
         Spacer(Modifier.height(10.dp))
 
-        // Front / Back Pill Switcher
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(24.dp))
-                .background(C.Surface)
-                .padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Choice("Front", !showBackThumb, Modifier.weight(1f)) { showBackThumb = false }
-            Choice("Back", showBackThumb, Modifier.weight(1f)) { showBackThumb = true }
+        // Front / Back Pill Switcher (only shown if back side was actually scanned)
+        val hasBack = (d.backThumb != null) || (draft.backImagePath != null)
+        if (hasBack) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(C.Surface)
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Choice("Front", !showBackThumb, Modifier.weight(1f)) { showBackThumb = false }
+                Choice("Back", showBackThumb, Modifier.weight(1f)) { showBackThumb = true }
+            }
+            Spacer(Modifier.height(16.dp))
         }
-        Spacer(Modifier.height(16.dp))
 
-        // Card Preview
+        // Card Preview - formatted to match the scanned image's true aspect ratio
         val currentThumb = if (showBackThumb && d.backThumb != null) d.backThumb else (d.frontThumb ?: d.thumb)
+        val isPortrait = currentThumb != null && currentThumb.height > currentThumb.width
+        val aspect = if (currentThumb != null && currentThumb.height > 0) {
+            (currentThumb.width.toFloat() / currentThumb.height.toFloat()).coerceIn(0.5f, 2.2f)
+        } else 1.586f
+
         Box(
-            Modifier
-                .fillMaxWidth()
-                .height(200.dp)
-                .clip(RoundedCornerShape(26.dp))
-                .background(C.CardColors[draft.colorIndex.mod(C.CardColors.size)]),
+            modifier = Modifier.fillMaxWidth(),
             contentAlignment = Alignment.Center,
         ) {
             if (currentThumb != null) {
-                Image(
-                    currentThumb.asImageBitmap(),
-                    "Card photo",
-                    Modifier.fillMaxSize().padding(10.dp).clip(RoundedCornerShape(18.dp)),
-                    contentScale = ContentScale.Crop,
-                )
+                Box(
+                    modifier = (if (isPortrait) Modifier.fillMaxWidth(0.68f) else Modifier.fillMaxWidth())
+                        .aspectRatio(aspect)
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(Color(0xFF141414))
+                        .border(1.dp, C.Outline.copy(alpha = 0.5f), RoundedCornerShape(22.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Image(
+                        bitmap = currentThumb.asImageBitmap(),
+                        contentDescription = "Card photo",
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(22.dp)),
+                        contentScale = ContentScale.Fit,
+                        filterQuality = FilterQuality.High,
+                    )
+                }
             } else {
                 Column(
                     modifier = Modifier.fillMaxSize().padding(20.dp),
                     verticalArrangement = Arrangement.SpaceBetween,
                 ) {
+                    val primaryTitle = draft.name.ifBlank { draft.category.ifBlank { draft.issuer.ifBlank { "Card" } } }
+                    val secondaryText = if (draft.issuer.isNotBlank() && !draft.issuer.equals(primaryTitle, ignoreCase = true)) {
+                        draft.issuer
+                    } else if (draft.name.isNotBlank() && !draft.category.equals(primaryTitle, ignoreCase = true)) {
+                        draft.category
+                    } else ""
                     Text(
-                        draft.issuer.ifBlank { draft.name.ifBlank { "Card" } },
+                        text = primaryTitle,
                         color = C.Ink,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
                     )
-                    Text(draft.category, color = C.Ink.copy(alpha = 0.75f), fontSize = 14.sp)
+                    if (secondaryText.isNotBlank()) {
+                        Text(
+                            text = secondaryText,
+                            color = C.Ink.copy(alpha = 0.75f),
+                            fontSize = 14.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        }
+
+        val isEngineReady = (vm.currentOcrEngine == AppOcrEngine.MLKIT) || vm.isAiModelReady
+        if (!isEngineReady) {
+            Spacer(Modifier.height(14.dp))
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(C.Yellow.copy(alpha = 0.15f))
+                    .padding(12.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("ℹ️", fontSize = 16.sp)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Manual entry: PaddleOCR package not downloaded. Download in Settings to enable auto-fill.",
+                        color = C.Cream,
+                        fontSize = 12.sp,
+                    )
                 }
             }
         }
 
         Text(
-            "Read on your phone",
-            color = C.Muted,
+            if (isEngineReady) "Auto-filled with on-device AI" else "Read on your phone (manual entry)",
+            color = if (isEngineReady) C.Mint else C.Muted,
             fontSize = 14.sp,
-            modifier = Modifier.padding(top = 20.dp, bottom = 8.dp),
+            fontWeight = if (isEngineReady) FontWeight.Medium else FontWeight.Normal,
+            modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
         )
-
         // Attributes container
         Group {
             Row2("Category") { MutedText(draft.category) }

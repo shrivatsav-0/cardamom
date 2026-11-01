@@ -109,8 +109,29 @@ fun AppRoot(vm: AppViewModel) {
                 composable("w2") { ScanIntroScreen(onBack = { nav.popBackStack() }, onNext = { nav.navigate("w3") }) }
                 composable("w3") {
                     UsernameScreen(vm, onBack = { nav.popBackStack() }, onDone = {
-                        nav.navigate("wallet") { popUpTo("w1") { inclusive = true } }
+                        nav.navigate("w4")
                     })
+                }
+                composable("w4") {
+                    ModelDownloadScreen(vm, onBack = { nav.popBackStack() }, onNext = {
+                        nav.navigate("w5")
+                    })
+                }
+                composable("w5") {
+                    SetupCompleteScreen(
+                        vm = vm,
+                        onStart = {
+                            nav.navigate("wallet") {
+                                popUpTo(0) { inclusive = true }
+                            }
+                        },
+                        onAddFirstCard = {
+                            nav.navigate("wallet") {
+                                popUpTo(0) { inclusive = true }
+                            }
+                            nav.navigate("scan")
+                        },
+                    )
                 }
                 composable("wallet") {
                     WalletScreen(
@@ -151,7 +172,7 @@ fun AppRoot(vm: AppViewModel) {
                         onSaved = { savedId ->
                             if (routeId == "new") {
                                 nav.navigate("detail/$savedId") {
-                                    popUpTo("wallet")
+                                    popUpTo("wallet") { inclusive = false }
                                 }
                             } else {
                                 nav.popBackStack()
@@ -161,7 +182,17 @@ fun AppRoot(vm: AppViewModel) {
                 }
                 composable("detail/{id}", arguments = idArg) { e ->
                     val id = e.arguments?.getString("id") ?: ""
-                    DetailScreen(vm, id, onBack = { nav.popBackStack() }, onEdit = { nav.navigate("edit/$id") }, onShare = { nav.navigate("share/$id") })
+                    DetailScreen(
+                        vm = vm,
+                        id = id,
+                        onBack = {
+                            nav.navigate("wallet") {
+                                popUpTo("wallet") { inclusive = true }
+                            }
+                        },
+                        onEdit = { nav.navigate("edit/$id") },
+                        onShare = { nav.navigate("share/$id") }
+                    )
                 }
                 composable("share/{id}", arguments = idArg) { e ->
                     ShareScreen(vm, e.arguments?.getString("id") ?: "", onBack = { nav.popBackStack() })
@@ -192,7 +223,11 @@ fun AppRoot(vm: AppViewModel) {
                     DocumentDetailScreen(
                         vm = vm,
                         id = id,
-                        onBack = { nav.popBackStack() },
+                        onBack = {
+                            nav.navigate("wallet") {
+                                popUpTo("wallet") { inclusive = true }
+                            }
+                        },
                         onEdit = { nav.navigate("doc_edit/$id") },
                     )
                 }

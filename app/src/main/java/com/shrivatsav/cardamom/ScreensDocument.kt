@@ -18,6 +18,8 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -29,6 +31,8 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material3.*
@@ -38,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -144,9 +149,9 @@ fun DocumentTile(
     val bg = colors[kotlin.math.abs(doc.id.hashCode()).mod(colors.size)]
 
     val ctx = LocalContext.current
-    val previewBmp = remember(doc, expanded) {
-        if (!expanded) null
-        else getDocumentImages(ctx, doc).firstOrNull() ?: getDocumentPdfPages(doc).firstOrNull()
+    val allDocPages = remember(doc, expanded) {
+        if (!expanded) emptyList<Bitmap>()
+        else getDocumentImages(ctx, doc).ifEmpty { getDocumentPdfPages(doc) }
     }
 
     Column(
@@ -194,24 +199,53 @@ fun DocumentTile(
                     .padding(top = 16.dp),
             ) {
                 // Full width document container taking as much space as image takes (landscape or vertical)
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Color.White)
-                        .clickable(onClick = onViewDetails),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (previewBmp != null) {
-                        Image(
-                            bitmap = previewBmp.asImageBitmap(),
-                            contentDescription = "Document preview",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 180.dp, max = 380.dp),
-                            contentScale = ContentScale.Fit,
+                if (allDocPages.isNotEmpty()) {
+                    val tilePagerState = rememberPagerState { allDocPages.size }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 200.dp, max = 340.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color(0xFF141414))
+                            .clickable(onClick = onViewDetails),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        HorizontalPager(
+                            state = tilePagerState,
+                            modifier = Modifier.fillMaxSize(),
+                        ) { page ->
+                            val bmp = allDocPages[page]
+                            Image(
+                                bitmap = bmp.asImageBitmap(),
+                                contentDescription = "Document page ${page + 1}",
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(RoundedCornerShape(16.dp)),
+                                contentScale = ContentScale.Crop,
+                                filterQuality = FilterQuality.High,
+                            )
+                        }
+                    }
+                    if (allDocPages.size > 1) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = "Page ${tilePagerState.currentPage + 1} of ${allDocPages.size} · Swipe to switch",
+                            color = Color(0xFF161616).copy(alpha = 0.75f),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth(),
                         )
-                    } else {
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color(0xFF141414))
+                            .clickable(onClick = onViewDetails),
+                        contentAlignment = Alignment.Center,
+                    ) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -326,7 +360,7 @@ fun DocumentScanScreen(
                     }
                     val doc = WalletDocument(
                         id = id,
-                        title = fileName.ifBlank { "Document" },
+                        title = "", // Document title must not be auto-filled; must be filled by user
                         docType = "Document",
                         uriPath = dest.absolutePath,
                         mimeType = "application/pdf",
@@ -346,38 +380,10 @@ fun DocumentScanScreen(
         }
     }
 
-    // Photo gallery picker
-    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) {
-            scope.launch {
-                vm.busyText = "Importing document photo"
-                try {
-                    val id = UUID.randomUUID().toString()
-                    val docDir = Files.dir(ctx, "documents")
-                    val dest = File(docDir, "doc_$id.jpg")
-                    withContext(Dispatchers.IO) {
-                        ctx.contentResolver.openInputStream(uri)?.use { input ->
-                            dest.outputStream().use { output -> input.copyTo(output) }
-                        }
-                    }
-                    val doc = WalletDocument(
-                        id = id,
-                        title = "Photo document",
-                        docType = "Document",
-                        uriPath = dest.absolutePath,
-                        mimeType = "image/jpeg",
-                        pageCount = 1,
-                        pagePaths = listOf(dest.absolutePath),
-                        fileSize = dest.length(),
-                    )
-                    vm.draftDoc = doc
-                    onScanned()
-                } catch (e: Exception) {
-                    Toast.makeText(ctx, "Couldn't import image: ${e.message}", Toast.LENGTH_SHORT).show()
-                } finally {
-                    vm.busyText = null
-                }
-            }
+    // Photo gallery picker (supports multiple photos / pages)
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+        if (!uris.isNullOrEmpty()) {
+            vm.importDocumentUris(uris, onDone = onScanned)
         }
     }
 
@@ -508,7 +514,7 @@ fun DocumentScanScreen(
                     )
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        text = "Photos of paper documents",
+                        text = "Pick one or multiple photos (pages)",
                         color = Color(0xFF161616).copy(alpha = 0.75f),
                         fontSize = 13.sp,
                     )
@@ -532,12 +538,22 @@ fun DocumentUploadScreen(
         return
     }
 
-    var title by remember { mutableStateOf(draft.title.ifBlank { "Document" }) }
+    var title by remember { mutableStateOf(draft.title) }
     var docType by remember { mutableStateOf(draft.docType.ifBlank { "Document" }) }
     var issuer by remember { mutableStateOf(draft.issuer) }
     var typeModal by remember { mutableStateOf(false) }
     var isDirectEdit by remember { mutableStateOf(false) }
     var editModalField by remember { mutableStateOf<String?>(null) }
+    var docFields by remember { mutableStateOf(draft.fields) }
+    var customLabelInput by remember { mutableStateOf("") }
+    var showCustomFieldDialog by remember { mutableStateOf(false) }
+    var selectedPageIndex by remember { mutableStateOf(0) }
+
+    val addMorePhotos = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+        if (!uris.isNullOrEmpty()) {
+            vm.addPagesToDraftDoc(uris)
+        }
+    }
 
     val docTypes = listOf(
         "National ID",
@@ -551,11 +567,14 @@ fun DocumentUploadScreen(
         "Document",
     )
 
-    val previewBmp = remember(draft.uriPath, draft.pagePaths) {
-        val path = draft.pagePaths.firstOrNull() ?: draft.uriPath
-        if (path.endsWith(".pdf", ignoreCase = true)) {
+    val pageCount = draft.pagePaths.size.coerceAtLeast(1)
+    val safePageIndex = selectedPageIndex.coerceIn(0, pageCount - 1)
+    val currentPath = draft.pagePaths.getOrNull(safePageIndex) ?: draft.uriPath
+
+    val previewBmp = remember(currentPath) {
+        if (currentPath.endsWith(".pdf", ignoreCase = true)) {
             try {
-                val f = File(path)
+                val f = File(currentPath)
                 val pfd = ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)
                 val renderer = PdfRenderer(pfd)
                 val page = renderer.openPage(0)
@@ -571,7 +590,7 @@ fun DocumentUploadScreen(
                 bmp
             } catch (e: Exception) { null }
         } else {
-            val f = File(path)
+            val f = File(currentPath)
             if (f.exists()) BitmapFactory.decodeFile(f.absolutePath) else null
         }
     }
@@ -589,62 +608,163 @@ fun DocumentUploadScreen(
         })
         Spacer(Modifier.height(16.dp))
 
-        val uploadAspect = if (previewBmp != null && previewBmp.height > 0) {
-            (previewBmp.width.toFloat() / previewBmp.height.toFloat()).coerceIn(0.5f, 2.0f)
-        } else (3f / 4f)
+        val uploadPageCount = draft.pagePaths.size.coerceAtLeast(1)
+        val uploadPagerState = rememberPagerState { uploadPageCount }
+        LaunchedEffect(uploadPagerState.currentPage) {
+            selectedPageIndex = uploadPagerState.currentPage
+        }
+
         Column(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(if (uploadAspect > 1.1f) 1f else 0.72f)
-                    .aspectRatio(uploadAspect)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color.White),
+                    .fillMaxWidth()
+                    .height(290.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color(0xFF141414))
+                    .border(1.dp, C.Outline.copy(alpha = 0.5f), RoundedCornerShape(20.dp)),
                 contentAlignment = Alignment.Center,
             ) {
-                if (previewBmp != null) {
-                    Image(
-                        bitmap = previewBmp.asImageBitmap(),
-                        contentDescription = "Document preview",
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Fit,
-                    )
-                } else {
-                    Column(
-                        modifier = Modifier.fillMaxSize().padding(14.dp),
-                    ) {
-                        Box(
-                            Modifier
-                                .width(70.dp)
-                                .height(12.dp)
-                                .clip(RoundedCornerShape(2.dp))
-                                .background(Color(0xFF8B7CF6))
+                HorizontalPager(
+                    state = uploadPagerState,
+                    modifier = Modifier.fillMaxSize(),
+                ) { page ->
+                    val path = draft.pagePaths.getOrNull(page) ?: ""
+                    val pageBmp = remember(path) {
+                        if (path.endsWith(".pdf", ignoreCase = true)) {
+                            try {
+                                val f = File(path)
+                                val pfd = ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)
+                                val renderer = PdfRenderer(pfd)
+                                val p = renderer.openPage(0)
+                                val scale = minOf(600f / p.width.coerceAtLeast(1), 2f).coerceAtLeast(1f)
+                                val bmp = Bitmap.createBitmap((p.width * scale).toInt(), (p.height * scale).toInt(), Bitmap.Config.ARGB_8888)
+                                bmp.eraseColor(android.graphics.Color.WHITE)
+                                val canvas = android.graphics.Canvas(bmp)
+                                canvas.drawColor(android.graphics.Color.WHITE)
+                                p.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                p.close()
+                                renderer.close()
+                                pfd.close()
+                                bmp
+                            } catch (e: Exception) { null }
+                        } else {
+                            val f = File(path)
+                            if (f.exists()) BitmapFactory.decodeFile(f.absolutePath) else null
+                        }
+                    }
+
+                    if (pageBmp != null) {
+                        Image(
+                            bitmap = pageBmp.asImageBitmap(),
+                            contentDescription = "Document preview page ${page + 1}",
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(20.dp)),
+                            contentScale = ContentScale.Crop,
+                            filterQuality = FilterQuality.High,
                         )
-                        Spacer(Modifier.height(10.dp))
-                        Box(Modifier.fillMaxWidth(0.9f).height(5.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFFD0C8B8)))
-                        Spacer(Modifier.height(6.dp))
-                        Box(Modifier.fillMaxWidth(0.95f).height(5.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFFD0C8B8)))
-                        Spacer(Modifier.height(6.dp))
-                        Box(Modifier.fillMaxWidth(0.8f).height(5.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFFD0C8B8)))
-                        Spacer(Modifier.height(6.dp))
-                        Box(Modifier.fillMaxWidth(0.55f).height(5.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFFD0C8B8)))
+                    } else {
+                        Column(
+                            modifier = Modifier.fillMaxSize().padding(14.dp),
+                            verticalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Box(Modifier.width(70.dp).height(12.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFF8B7CF6)))
+                            Box(Modifier.fillMaxWidth(0.9f).height(5.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFFD0C8B8)))
+                            Box(Modifier.fillMaxWidth(0.95f).height(5.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFFD0C8B8)))
+                            Box(Modifier.fillMaxWidth(0.8f).height(5.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFFD0C8B8)))
+                        }
                     }
                 }
             }
-            Spacer(Modifier.height(12.dp))
-            Text(
-                text = "${draft.pageCount} ${if (draft.pageCount == 1) "page captured" else "pages captured"}",
-                color = C.Muted,
-                fontSize = 14.sp,
-            )
+
+            if (draft.pagePaths.size > 1) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "Page ${uploadPagerState.currentPage + 1} of ${draft.pagePaths.size} · Swipe to switch",
+                    color = C.Muted,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(C.Surface)
+                        .clickable {
+                            vm.external()
+                            addMorePhotos.launch("image/*")
+                        }
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Add, contentDescription = null, tint = C.Yellow, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Add more pages", color = C.Yellow, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+                if (draft.pagePaths.size > 1) {
+                    Spacer(Modifier.width(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(C.Surface)
+                            .clickable {
+                                vm.removePageFromDraftDoc(safePageIndex)
+                                if (selectedPageIndex >= draft.pagePaths.size - 1) {
+                                    selectedPageIndex = (draft.pagePaths.size - 2).coerceAtLeast(0)
+                                }
+                            }
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Delete, contentDescription = null, tint = C.Danger, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Remove page", color = C.Danger, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                }
+            }
         }
 
+        val isEngineReady = (vm.currentOcrEngine == AppOcrEngine.MLKIT) || vm.isAiModelReady
+        if (!isEngineReady) {
+            Spacer(Modifier.height(14.dp))
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(C.Yellow.copy(alpha = 0.15f))
+                    .padding(12.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("ℹ️", fontSize = 16.sp)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Manual entry: On-device AI model not downloaded. Type document fields manually.",
+                        color = C.Cream,
+                        fontSize = 12.sp,
+                    )
+                }
+            }
+        }
         Spacer(Modifier.height(20.dp))
 
         if (!isDirectEdit) {
-            BlockField("Document title", title, "Tap to enter title") { isDirectEdit = true }
+            BlockField("Document title *", title, "Tap to enter title * (Required)") { isDirectEdit = true }
             Spacer(Modifier.height(12.dp))
             BlockField(
                 label = "Document type",
@@ -656,7 +776,7 @@ fun DocumentUploadScreen(
             Spacer(Modifier.height(12.dp))
             BlockField("Issuing authority", issuer, "Tap to enter issuing authority") { isDirectEdit = true }
         } else {
-            CField("Document title", title, { title = it }, singleLine = false, maxLines = 4)
+            CField("Document title *", title, { title = it }, singleLine = false, maxLines = 4)
             Spacer(Modifier.height(12.dp))
             BlockField(
                 label = "Document type",
@@ -668,6 +788,77 @@ fun DocumentUploadScreen(
             Spacer(Modifier.height(12.dp))
             CField("Issuing authority", issuer, { issuer = it }, singleLine = false, maxLines = 4)
         }
+
+        // Suggested Attributes section
+        val suggestedAttrs = listOf("Document No", "Date of Issue", "Expiry Date", "Holder Name", "Account No", "Reference No")
+        val availableSuggestions = suggestedAttrs.filter { sug -> docFields.none { it.label.equals(sug, true) } }
+
+        if (availableSuggestions.isNotEmpty()) {
+            Spacer(Modifier.height(18.dp))
+            Text("Suggested attributes", color = C.Muted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                availableSuggestions.forEach { label ->
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(C.Surface)
+                            .border(1.dp, C.Outline.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                            .clickable {
+                                docFields = (docFields + CardField(label, "")).toMutableList()
+                            }
+                            .padding(horizontal = 12.dp, vertical = 7.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Add, contentDescription = null, tint = C.Yellow, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(label, color = C.Cream, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Custom attributes list
+        if (docFields.isNotEmpty()) {
+            Spacer(Modifier.height(18.dp))
+            Text("Document attributes", color = C.Muted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(8.dp))
+            docFields.forEachIndexed { index, field ->
+                if (index > 0) Spacer(Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    CField(
+                        label = field.label,
+                        value = field.value,
+                        onChange = { newVal ->
+                            val updatedList = docFields.toMutableList()
+                            updatedList[index] = field.copy(value = newVal)
+                            docFields = updatedList
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(
+                        onClick = {
+                            val updatedList = docFields.toMutableList()
+                            updatedList.removeAt(index)
+                            docFields = updatedList
+                        }
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "Remove field", tint = C.Danger)
+                    }
+                }
+            }
+        }
+
         Spacer(Modifier.height(28.dp))
 
         PrimaryButton("Upload document", enabled = title.isNotBlank() && docType.isNotBlank(), onClick = {
@@ -675,6 +866,7 @@ fun DocumentUploadScreen(
                 title = title.trim(),
                 docType = docType,
                 issuer = issuer.trim(),
+                fields = docFields,
             )
             vm.saveDoc(updated)
             onUploaded(updated.id)
@@ -810,9 +1002,11 @@ fun DocumentDetailScreen(
         Spacer(Modifier.height(16.dp))
 
         // Primary Document Container with true aspect ratio (16:9, 9:16, etc.)
-        val firstBmp = allPages.firstOrNull()
-        val docAspect = if (firstBmp != null && firstBmp.height > 0) {
-            (firstBmp.width.toFloat() / firstBmp.height.toFloat()).coerceIn(0.5f, 2.0f)
+        var currentDetailPageIndex by remember { mutableStateOf(0) }
+        val safeDetailIndex = currentDetailPageIndex.coerceIn(0, (allPages.size - 1).coerceAtLeast(0))
+        val currentDetailBmp = allPages.getOrNull(safeDetailIndex)
+        val docAspect = if (currentDetailBmp != null && currentDetailBmp.height > 0) {
+            (currentDetailBmp.width.toFloat() / currentDetailBmp.height.toFloat()).coerceIn(0.5f, 2.0f)
         } else (3f / 4f)
 
         Box(
@@ -836,10 +1030,10 @@ fun DocumentDetailScreen(
                         .background(Color.White),
                     contentAlignment = Alignment.Center,
                 ) {
-                    if (firstBmp != null) {
+                    if (currentDetailBmp != null) {
                         Image(
-                            bitmap = firstBmp.asImageBitmap(),
-                            contentDescription = "Page 1",
+                            bitmap = currentDetailBmp.asImageBitmap(),
+                            contentDescription = "Page ${safeDetailIndex + 1}",
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Fit,
                         )
@@ -860,15 +1054,49 @@ fun DocumentDetailScreen(
                         }
                     }
                 }
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    text = "Page 1 of ${allPages.size.coerceAtLeast(displayDoc.pageCount)}",
-                    color = C.Muted,
-                    fontSize = 13.sp,
-                )
+                if (allPages.size > 1) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(
+                            onClick = { if (safeDetailIndex > 0) currentDetailPageIndex-- },
+                            enabled = safeDetailIndex > 0,
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                                contentDescription = "Previous page",
+                                tint = if (safeDetailIndex > 0) C.Cream else C.Muted.copy(alpha = 0.3f),
+                            )
+                        }
+                        Text(
+                            text = "Page ${safeDetailIndex + 1} of ${allPages.size}",
+                            color = C.Cream,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        IconButton(
+                            onClick = { if (safeDetailIndex < allPages.size - 1) currentDetailPageIndex++ },
+                            enabled = safeDetailIndex < allPages.size - 1,
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = "Next page",
+                                tint = if (safeDetailIndex < allPages.size - 1) C.Cream else C.Muted.copy(alpha = 0.3f),
+                            )
+                        }
+                    }
+                } else {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        text = "1 page",
+                        color = C.Muted,
+                        fontSize = 13.sp,
+                    )
+                }
             }
         }
-
         Spacer(Modifier.height(28.dp))
 
         // Action buttons: Share (cream pill), Edit (dark pill), Delete (dark pill with red text)

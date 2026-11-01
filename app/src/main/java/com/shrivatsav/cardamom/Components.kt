@@ -279,9 +279,9 @@ fun TopBar(title: String, onBack: (() -> Unit)?, trailing: @Composable () -> Uni
 }
 
 @Composable
-fun Dots(active: Int) {
+fun Dots(active: Int, total: Int = 3) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-        repeat(3) { i ->
+        repeat(total) { i ->
             Box(
                 Modifier.padding(horizontal = 3.dp).height(8.dp).width(if (i == active) 24.dp else 8.dp)
                     .clip(RoundedCornerShape(4.dp)).background(if (i == active) C.Yellow else Color(0xFF4A4A4A))
@@ -605,12 +605,68 @@ fun PointsRow(card: WalletCard) {
 @Composable
 fun CardFieldsRow(card: WalletCard) {
     if (card.fields.isNotEmpty()) {
-        val topFields = card.fields.take(3)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            topFields.forEachIndexed { i, f ->
-                Column(horizontalAlignment = if (i == 0) Alignment.Start else if (i == topFields.size - 1) Alignment.End else Alignment.CenterHorizontally) {
-                    Text(f.label, color = C.Ink.copy(alpha = 0.75f), fontSize = 12.sp, maxLines = 1)
-                    Text(f.value, color = C.Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        val uniqueFields = card.fields.distinctBy { it.label.lowercase() }.distinctBy { it.value.lowercase() }
+        val longField = uniqueFields.firstOrNull { it.value.length > 16 }
+        val compactFields = uniqueFields.filter { it != longField }.take(if (longField != null) 2 else 3)
+
+        Column(Modifier.fillMaxWidth()) {
+            if (longField != null) {
+                Column(Modifier.fillMaxWidth()) {
+                    Text(
+                        text = longField.label.uppercase(),
+                        color = C.Ink.copy(alpha = 0.70f),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 0.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = longField.value,
+                        color = C.Ink,
+                        fontSize = 15.sp,
+                        lineHeight = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (compactFields.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                }
+            }
+
+            if (compactFields.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    compactFields.forEach { f ->
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            horizontalAlignment = Alignment.Start,
+                        ) {
+                            Text(
+                                text = f.label.uppercase(),
+                                color = C.Ink.copy(alpha = 0.70f),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                letterSpacing = 0.4.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = f.value,
+                                color = C.Ink,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -649,28 +705,31 @@ fun CardTile(
         Column(Modifier.padding(18.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    val issuerText = card.issuer.ifBlank { card.name.ifBlank { "Card name" } }
+                    val primaryTitle = card.name.ifBlank { card.category.ifBlank { card.issuer.ifBlank { "Card name" } } }
                     Text(
-                        text = issuerText,
+                        text = primaryTitle,
                         color = C.Ink,
-                        fontSize = if (issuerText.contains('\n') || issuerText.length > 22) 17.sp else 20.sp,
+                        fontSize = if (primaryTitle.contains('\n') || primaryTitle.length > 22) 17.sp else 20.sp,
                         lineHeight = 21.sp,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    val subName = when {
-                        card.issuer.isNotBlank() && card.name.isNotBlank() && !card.name.equals(card.issuer, true) -> card.name
-                        else -> card.category
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = subName,
-                            color = C.Ink.copy(alpha = 0.75f),
-                            fontSize = 13.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                    val secondaryText = if (card.issuer.isNotBlank() && !card.issuer.equals(primaryTitle, ignoreCase = true)) {
+                        card.issuer
+                    } else if (card.name.isNotBlank() && !card.category.equals(primaryTitle, ignoreCase = true)) {
+                        card.category
+                    } else ""
+                    if (secondaryText.isNotBlank()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = secondaryText,
+                                color = C.Ink.copy(alpha = 0.75f),
+                                fontSize = 13.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                 }
                 if (!expanded && card.code.isNotBlank()) {

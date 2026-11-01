@@ -218,6 +218,24 @@ class Prefs(ctx: Context) {
         set(v) {
             sp.edit().putBoolean("quick_actions_v2", true).putStringSet("quick_actions", v).apply()
         }
+    var aiModelDownloaded: Boolean
+        get() = sp.getBoolean("ai_model_downloaded", false)
+        set(v) { sp.edit().putBoolean("ai_model_downloaded", v).apply() }
+    var aiModelVersion: String
+        get() = sp.getString("ai_model_version", "") ?: ""
+        set(v) { sp.edit().putString("ai_model_version", v).apply() }
+    var aiModelSizeBytes: Long
+        get() = sp.getLong("ai_model_size_bytes", 0L)
+        set(v) { sp.edit().putLong("ai_model_size_bytes", v).apply() }
+    var aiModelSkipped: Boolean
+        get() = sp.getBoolean("ai_model_skipped", false)
+        set(v) { sp.edit().putBoolean("ai_model_skipped", v).apply() }
+    var aiModelScript: String
+        get() = sp.getString("ai_model_script", "DEVANAGARI_INDIC") ?: "DEVANAGARI_INDIC"
+        set(v) { sp.edit().putString("ai_model_script", v).apply() }
+    var ocrEngine: String
+        get() = sp.getString("ocr_engine", AppOcrEngine.MLKIT.id) ?: AppOcrEngine.MLKIT.id
+        set(v) { sp.edit().putString("ocr_engine", v).apply() }
 }
 
 /** Backup / card-file format: JSON, optionally encrypted with a password (PBKDF2 + AES-GCM). */
