@@ -321,6 +321,55 @@ fun Row2(label: String, onClick: (() -> Unit)? = null, trailing: @Composable () 
 }
 
 @Composable
+fun SettingLinkRow(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    badge: String? = null,
+    trailingIcon: Boolean = true,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            Spacer(Modifier.height(3.dp))
+            Text(
+                subtitle,
+                color = C.Muted,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (!badge.isNullOrBlank()) {
+            Spacer(Modifier.width(12.dp))
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(C.Yellow.copy(alpha = 0.15f))
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+            ) {
+                Text(badge, color = C.Yellow, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+        if (trailingIcon) {
+            Spacer(Modifier.width(8.dp))
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = C.Muted,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    }
+}
+
+@Composable
 fun CardAttributeTwoLine(
     label: String,
     value: String,

@@ -95,6 +95,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var draft by mutableStateOf<WalletCard?>(null)
     var detected by mutableStateOf<Detected?>(null)
     var busyText by mutableStateOf<String?>(null)
+    var showPeriodicSupportModal by mutableStateOf(false)
+    var showDonationModal by mutableStateOf(false)
 
     /** Set before launching a system picker / share sheet so leaving the app doesn't re-lock it. */
     private var skipNextLock = false
@@ -119,7 +121,32 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 locked = true
             }
         }
+        checkPeriodicSupportPrompt()
     }
+    fun checkPeriodicSupportPrompt() {
+        if (!onboarded || locked) return
+        val now = System.currentTimeMillis()
+        val last = prefs.lastSupportPromptTime
+        if (last == 0L) {
+            prefs.lastSupportPromptTime = now
+            return
+        }
+        if (now - last >= SUPPORT_INTERVAL_MS) {
+            showPeriodicSupportModal = true
+        }
+    }
+
+    fun dismissPeriodicSupportModal() {
+        showPeriodicSupportModal = false
+        prefs.lastSupportPromptTime = System.currentTimeMillis()
+    }
+
+    fun openDonationFromSupportModal() {
+        showPeriodicSupportModal = false
+        prefs.lastSupportPromptTime = System.currentTimeMillis()
+        showDonationModal = true
+    }
+
 
     fun card(id: String): WalletCard? = cards.value.firstOrNull { it.id == id }
     fun save(c: WalletCard) = repo.upsert(c)
@@ -162,6 +189,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         lockEnabled = lock; prefs.lockEnabled = lock
         userAvatarPath = avatarPath; prefs.userAvatarPath = avatarPath
         onboarded = true; prefs.onboarded = true
+        if (prefs.lastSupportPromptTime == 0L) {
+            prefs.lastSupportPromptTime = System.currentTimeMillis()
+        }
     }
 
     fun rename(name: String) { userName = name; prefs.userName = name }
@@ -410,5 +440,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             pageCount = updatedPaths.size.coerceAtLeast(1),
             fileSize = totalSize,
         )
+    }
+
+    companion object {
+        /** 75 days in milliseconds (between 2 and 3 months) */
+        const val SUPPORT_INTERVAL_MS = 75L * 24 * 60 * 60 * 1000L
     }
 }

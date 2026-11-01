@@ -236,6 +236,9 @@ class Prefs(ctx: Context) {
     var ocrEngine: String
         get() = sp.getString("ocr_engine", AppOcrEngine.MLKIT.id) ?: AppOcrEngine.MLKIT.id
         set(v) { sp.edit().putString("ocr_engine", v).apply() }
+    var lastSupportPromptTime: Long
+        get() = sp.getLong("last_support_prompt_time", 0L)
+        set(v) { sp.edit().putLong("last_support_prompt_time", v).apply() }
 }
 
 /** Backup / card-file format: JSON, optionally encrypted with a password (PBKDF2 + AES-GCM). */

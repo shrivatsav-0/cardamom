@@ -105,7 +105,7 @@ fun WelcomeScreen(onNext: () -> Unit) {
         )
         Text("Every store card and code in one place, private on your phone.", color = C.Muted, fontSize = 17.sp, modifier = Modifier.padding(top = 14.dp))
         Box(Modifier.weight(1f).fillMaxWidth()) { CardFan() }
-        Dots(0, total = 5)
+        Dots(0, total = 6)
         Spacer(Modifier.height(20.dp))
         PrimaryButton("Next", onNext)
     }
@@ -142,7 +142,7 @@ fun ScanIntroScreen(onBack: () -> Unit, onNext: () -> Unit) {
         Bullet("Or pick a photo, or type the number")
         Bullet("Cards stay only on your phone")
         Spacer(Modifier.weight(1f))
-        Dots(1, total = 5)
+        Dots(1, total = 6)
         Spacer(Modifier.height(20.dp))
         PrimaryButton("Next", onNext)
     }
@@ -262,7 +262,7 @@ fun UsernameScreen(vm: AppViewModel, onBack: () -> Unit, onDone: () -> Unit) {
                     ToggleRow("Lock with fingerprint or PIN", "Recommended", lock) { lock = it }
                 }
                 Column(Modifier.padding(top = 28.dp)) {
-                    Dots(2, total = 5)
+                    Dots(2, total = 6)
                     Spacer(Modifier.height(20.dp))
                     PrimaryButton("Next", onClick = { submit() }, enabled = name.isNotBlank())
                 }
@@ -427,7 +427,7 @@ fun ModelDownloadScreen(vm: AppViewModel, onBack: () -> Unit, onNext: () -> Unit
         }
 
         Spacer(Modifier.height(24.dp))
-        Dots(3, total = 5)
+        Dots(3, total = 6)
         Spacer(Modifier.height(18.dp))
 
         PrimaryButton("Continue", onClick = onNext)
@@ -536,7 +536,7 @@ fun SetupCompleteScreen(
                 }
 
                 Column(Modifier.padding(top = 28.dp)) {
-                    Dots(4, total = 5)
+                    Dots(5, total = 6)
                     Spacer(Modifier.height(20.dp))
                     PrimaryButton("Start adding cards", onClick = {
                         vm.finishOnboarding()
@@ -551,6 +551,15 @@ fun SetupCompleteScreen(
             }
         }
     }
+}
+
+@Composable
+fun DeveloperSupportScreen(
+    vm: AppViewModel,
+    onBack: () -> Unit,
+    onNext: () -> Unit,
+) {
+    OnboardingDeveloperSupportScreen(vm = vm, onBack = onBack, onNext = onNext)
 }
 
 @Composable

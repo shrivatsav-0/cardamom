@@ -100,6 +100,9 @@ fun WalletScreen(
     var cardToDelete by remember { mutableStateOf<WalletCard?>(null) }
     var activeDocToolbar by remember { mutableStateOf<WalletDocument?>(null) }
     var docToDelete by remember { mutableStateOf<WalletDocument?>(null) }
+    LaunchedEffect(Unit) {
+        vm.checkPeriodicSupportPrompt()
+    }
 
     val pinnedCard = remember(cards, vm.pinnedCardId) {
         cards.firstOrNull { it.id == vm.pinnedCardId }

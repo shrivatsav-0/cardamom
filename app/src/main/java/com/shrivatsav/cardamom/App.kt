@@ -98,6 +98,7 @@ fun AppRoot(vm: AppViewModel) {
                 act.intent.removeExtra("shortcut")
                 nav.navigate("scan")
             }
+            vm.checkPeriodicSupportPrompt()
         }
     }
     Box(Modifier.fillMaxSize()) {
@@ -118,6 +119,13 @@ fun AppRoot(vm: AppViewModel) {
                     })
                 }
                 composable("w5") {
+                    DeveloperSupportScreen(
+                        vm = vm,
+                        onBack = { nav.popBackStack() },
+                        onNext = { nav.navigate("w6") },
+                    )
+                }
+                composable("w6") {
                     SetupCompleteScreen(
                         vm = vm,
                         onStart = {
@@ -245,5 +253,22 @@ fun AppRoot(vm: AppViewModel) {
             }
         }
         vm.busyText?.let { BusyOverlay(it) }
+        if (vm.showPeriodicSupportModal && !vm.locked && vm.onboarded) {
+            PeriodicSupportModal(
+                onDismiss = { vm.dismissPeriodicSupportModal() },
+                onSupport = { vm.openDonationFromSupportModal() },
+                onConnect = {
+                    vm.dismissPeriodicSupportModal()
+                    vm.external()
+                    SupportLinks.openUrl(ctx, SupportLinks.LINKEDIN)
+                },
+            )
+        }
+        if (vm.showDonationModal) {
+            DonationModal(
+                onDismiss = { vm.showDonationModal = false },
+                vm = vm,
+            )
+        }
     }
 }

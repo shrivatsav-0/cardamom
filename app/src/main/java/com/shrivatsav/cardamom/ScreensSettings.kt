@@ -35,6 +35,7 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit, onBackup: () -> Unit) {
     var ocrEngineDialog by remember { mutableStateOf(false) }
     var privacyModal by remember { mutableStateOf(false) }
     var termsModal by remember { mutableStateOf(false) }
+    var donationModal by remember { mutableStateOf(false) }
     val aiStatus by vm.aiModelStatus.collectAsState()
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
@@ -141,6 +142,53 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit, onBackup: () -> Unit) {
         GroupTitle("Data")
         Group {
             Row2("Backup & restore", onClick = onBackup) { MutedText("Open") }
+        }
+        GroupTitle("Developer & Socials")
+        Group {
+            SettingLinkRow(
+                title = "LinkedIn",
+                subtitle = SupportLinks.LINKEDIN_DISPLAY,
+                onClick = {
+                    vm.external()
+                    SupportLinks.openUrl(ctx, SupportLinks.LINKEDIN)
+                },
+            )
+            Sep()
+            SettingLinkRow(
+                title = "GitHub",
+                subtitle = SupportLinks.GITHUB_DISPLAY,
+                onClick = {
+                    vm.external()
+                    SupportLinks.openUrl(ctx, SupportLinks.GITHUB)
+                },
+            )
+            Sep()
+            SettingLinkRow(
+                title = "Personal Website",
+                subtitle = SupportLinks.WEBSITE_DISPLAY,
+                onClick = {
+                    vm.external()
+                    SupportLinks.openUrl(ctx, SupportLinks.WEBSITE)
+                },
+            )
+            Sep()
+            SettingLinkRow(
+                title = "Email Developer",
+                subtitle = SupportLinks.EMAIL,
+                onClick = {
+                    vm.external()
+                    SupportLinks.sendEmail(ctx)
+                },
+            )
+        }
+        GroupTitle("Support & Donations")
+        Group {
+            SettingLinkRow(
+                title = "Donate & Support",
+                subtitle = "Ko-fi, UPI (${SupportLinks.UPI_ID}) & QR code",
+                badge = "Donate",
+                onClick = { donationModal = true },
+            )
         }
         GroupTitle("Legal & About")
         Group {
@@ -477,6 +525,12 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit, onBackup: () -> Unit) {
                 PrimaryButton("Close", onClick = { termsModal = false })
             }
         }
+    }
+    if (donationModal) {
+        DonationModal(
+            onDismiss = { donationModal = false },
+            vm = vm,
+        )
     }
 }
 
