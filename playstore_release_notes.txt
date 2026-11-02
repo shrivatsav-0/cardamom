@@ -1,0 +1,7 @@
+Cardamom v1.0.1: Private offline wallet with 3D cards and fast scanner
+
+- Added 3D flippable cards with front and back interactive perspectives
+- Added on-device OCR and instant universal barcode scanner
+- Added multi-page document camera scanner with perspective correction
+- Reduced app download size with optimized architecture split packages
+- Added AES-256-GCM encrypted self-custody vault backups

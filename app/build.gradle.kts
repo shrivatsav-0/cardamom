@@ -18,12 +18,24 @@ android {
     applicationId = "com.shrivatsav.cardamom"
     minSdk = 30
     targetSdk = 37
-    versionCode = 1
-    versionName = "1.0"
+    versionCode = 2
+    versionName = "1.0.1"
   }
+  flavorDimensions += "distribution"
+  productFlavors {
+    create("play") {
+      dimension = "distribution"
+    }
+    create("github") {
+      dimension = "distribution"
+    }
+  }
+  val enableSplits = project.findProperty("splitApks")?.toString()?.toBoolean()
+    ?: (gradle.startParameter.taskNames.any { it.contains("github", ignoreCase = true) } &&
+        gradle.startParameter.taskNames.none { it.contains("bundle", ignoreCase = true) || it.contains("play", ignoreCase = true) })
   splits {
     abi {
-      isEnable = true
+      isEnable = enableSplits
       reset()
       include("arm64-v8a", "armeabi-v7a", "x86_64")
       isUniversalApk = false
