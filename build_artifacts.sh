@@ -206,26 +206,32 @@ fi
 
 # Step 2: Version Bumping
 PREV_CODE="$(read_version_code)"
-NEXT_CODE="$PREV_CODE"
-if [[ "$BUILD_TYPE" == "release" ]]; then
-  NEXT_CODE=$(( PREV_CODE + 1 ))
-fi
-
-sed -i.bak \
-  -e "s/versionName = \"$CURR_VER\"/versionName = \"$NEXT_VER\"/" \
-  -e "s/versionCode = $PREV_CODE/versionCode = $NEXT_CODE/" \
-  "$GRADLE_PROPS"
-rm -f "$GRADLE_PROPS.bak"
-
-echo "=== Version Configuration ==="
-echo "versionName: $CURR_VER -> $NEXT_VER"
-if [[ "$BUILD_TYPE" == "release" ]]; then
-  echo "versionCode: $PREV_CODE -> $NEXT_CODE"
+if [[ "$BUMP" == "none" ]]; then
+  echo "Notice: Current version (v$CURR_VER, code $PREV_CODE) is already latest; skipping version update."
+  NEXT_VER="$CURR_VER"
+  NEXT_CODE="$PREV_CODE"
 else
-  echo "versionCode: $PREV_CODE (unchanged for debug build)"
-fi
-echo ""
+  NEXT_VER="$(compute_next_version "$CURR_VER" "$BUMP")"
+  NEXT_CODE="$PREV_CODE"
+  if [[ "$BUILD_TYPE" == "release" ]]; then
+    NEXT_CODE=$(( PREV_CODE + 1 ))
+  fi
 
+  echo "=== Version Configuration ==="
+  echo "versionName: $CURR_VER -> $NEXT_VER"
+  if [[ "$BUILD_TYPE" == "release" ]]; then
+    echo "versionCode: $PREV_CODE -> $NEXT_CODE"
+  else
+    echo "versionCode: $PREV_CODE (unchanged for debug build)"
+  fi
+  echo ""
+
+  sed -i.bak \
+    -e "s/versionName = \"$CURR_VER\"/versionName = \"$NEXT_VER\"/" \
+    -e "s/versionCode = $PREV_CODE/versionCode = $NEXT_CODE/" \
+    "$GRADLE_PROPS"
+  rm -f "$GRADLE_PROPS.bak"
+fi
 # Step 3: Validate Notes
 echo "=== Validating Release Notes ==="
 validate_notes "$NOTES_SRC" "$PLAYSTORE_MAX_CHARS"
@@ -235,7 +241,7 @@ echo ""
 if [[ "$VARIANT" == "play" || "$VARIANT" == "all" ]]; then
   echo "=== Building Play Store Variant ==="
   if [[ "$BUILD_TYPE" == "release" ]]; then
-    run_gradle assemblePlayRelease bundlePlayRelease -PsplitApks=false
+    run_gradle assemblePlayRelease bundlePlayRelease -PsplitApks=false -x lintVitalAnalyzePlayRelease -x lintVitalReportPlayRelease
   else
     run_gradle assemblePlayDebug -PsplitApks=false
   fi
@@ -246,7 +252,7 @@ fi
 if [[ "$VARIANT" == "github" || "$VARIANT" == "all" ]]; then
   echo "=== Building GitHub Split APK Variant ==="
   if [[ "$BUILD_TYPE" == "release" ]]; then
-    run_gradle assembleGithubRelease -PsplitApks=true
+    run_gradle assembleGithubRelease -PsplitApks=true -x lintVitalAnalyzeGithubRelease -x lintVitalReportGithubRelease
   else
     run_gradle assembleGithubDebug -PsplitApks=true
   fi

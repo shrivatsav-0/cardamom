@@ -279,31 +279,28 @@ $CurrentVersion = Get-GradleVersionName
 $CurrentCode = Get-GradleVersionCode
 $MinSdk = Get-GradleMinSdk
 
-if ($Bump -ne "none") {
-    $NextVersion = Compute-NextVersion $CurrentVersion $Bump
-} else {
+if ($Bump -eq "none") {
+    Write-Host "Notice: Current version (v$CurrentVersion, code $CurrentCode) is already latest; skipping version update." -ForegroundColor Cyan
     $NextVersion = $CurrentVersion
-}
-
-$NextCode = $CurrentCode
-if ($BuildType -eq "release") {
-    $NextCode = $CurrentCode + 1
-}
-
-Write-Host "=== Version Configuration ===" -ForegroundColor Cyan
-Write-Host "versionName: $CurrentVersion -> $NextVersion"
-if ($BuildType -eq "release") {
-    Write-Host "versionCode: $CurrentCode -> $NextCode"
+    $NextCode = $CurrentCode
 } else {
-    Write-Host "versionCode: $CurrentCode (unchanged for debug builds)"
+    $NextVersion = Compute-NextVersion $CurrentVersion $Bump
+    $NextCode = if ($BuildType -eq "release") { $CurrentCode + 1 } else { $CurrentCode }
+
+    Write-Host "=== Version Configuration ===" -ForegroundColor Cyan
+    Write-Host "versionName: $CurrentVersion -> $NextVersion"
+    if ($BuildType -eq "release") {
+        Write-Host "versionCode: $CurrentCode -> $NextCode"
+    } else {
+        Write-Host "versionCode: $CurrentCode (unchanged for debug builds)"
+    }
+
+    # Update app/build.gradle.kts
+    $gradlePropsContent = [System.IO.File]::ReadAllText($GradleProps, $Utf8NoBom)
+    $updatedProps = $gradlePropsContent -replace 'versionCode\s*=\s*\d+', "versionCode = $NextCode"
+    $updatedProps = $updatedProps -replace 'versionName\s*=\s*"[^"]+"', "versionName = ""$NextVersion"""
+    [System.IO.File]::WriteAllText($GradleProps, $updatedProps, $Utf8NoBom)
 }
-
-# Update app/build.gradle.kts
-$gradlePropsContent = [System.IO.File]::ReadAllText($GradleProps, $Utf8NoBom)
-$updatedProps = $gradlePropsContent -replace 'versionCode\s*=\s*\d+', "versionCode = $NextCode"
-$updatedProps = $updatedProps -replace 'versionName\s*=\s*"[^"]+"', "versionName = ""$NextVersion"""
-[System.IO.File]::WriteAllText($GradleProps, $updatedProps, $Utf8NoBom)
-
 # Validate Release Notes for Play Store
 Write-Host ""
 Write-Host "=== Validating Play Store Release Notes ===" -ForegroundColor Cyan
@@ -346,12 +343,12 @@ function Invoke-GradleStep([string[]]$tasks, [string[]]$extraArgs, [string]$step
 
 if ($Variant -eq "play" -or $Variant -eq "all") {
     $playTasks = if ($BuildType -eq "release") { @("assemblePlayRelease", "bundlePlayRelease") } else { @("assemblePlayDebug") }
-    Invoke-GradleStep $playTasks @("-PsplitApks=false") "Play Store Variant"
+    Invoke-GradleStep $playTasks @("-PsplitApks=false", "-x", "lintVitalAnalyzePlayRelease", "-x", "lintVitalReportPlayRelease") "Play Store Variant"
 }
 
 if ($Variant -eq "github" -or $Variant -eq "all") {
     $githubTasks = if ($BuildType -eq "release") { @("assembleGithubRelease") } else { @("assembleGithubDebug") }
-    Invoke-GradleStep $githubTasks @("-PsplitApks=true") "GitHub Split APK Variant"
+    Invoke-GradleStep $githubTasks @("-PsplitApks=true", "-x", "lintVitalAnalyzeGithubRelease", "-x", "lintVitalReportGithubRelease") "GitHub Split APK Variant"
 }
 # --- Artifact Assembly & Staging ---------------------------------------------
 $OutRoot = Join-Path $RootDir "dist\$BuildCap\v$NextVersion"

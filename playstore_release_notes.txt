@@ -1,4 +1,4 @@
-Cardamom v1.0.2: Export to PDF with details and flexible scanner
+Cardamom v1.0.3: Export to PDF with details and flexible scanner
 
 - Added multi-page PDF export for documents with details and watermark
 - Added front and back card sharing with dynamic attribute fields
