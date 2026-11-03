@@ -29,6 +29,28 @@ enum class CodeFormat(val label: String, val zx: BarcodeFormat, val ml: Int) {
     }
 }
 
+enum class AppOcrEngine(
+    val id: String,
+    val displayName: String,
+    val subtitle: String,
+) {
+    MLKIT(
+        id = "MLKIT",
+        displayName = "Google ML Kit",
+        subtitle = "Default engine · On-device multilingual recognition",
+    ),
+    PADDLE(
+        id = "PADDLE",
+        displayName = "PaddleOCR",
+        subtitle = "Alternative engine · On-device mobile inference",
+    );
+
+    companion object {
+        fun fromId(id: String): AppOcrEngine =
+            values().firstOrNull { it.id.equals(id, ignoreCase = true) } ?: MLKIT
+    }
+}
+
 enum class LogoMode { AUTO, EMOJI, IMAGE }
 
 data class CardField(

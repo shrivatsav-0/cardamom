@@ -1,5 +1,5 @@
 package com.shrivatsav.cardamom
-
+import com.shrivatsav.cardamom.ui.R
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle

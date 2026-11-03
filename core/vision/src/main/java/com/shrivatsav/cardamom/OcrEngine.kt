@@ -41,31 +41,6 @@ data class OcrResult(
     val errorMessage: String? = null,
 )
 
-/**
- * Supported on-device OCR engines.
- * Google ML Kit is the default. PaddleOCR is an optional alternative in Settings.
- */
-enum class AppOcrEngine(
-    val id: String,
-    val displayName: String,
-    val subtitle: String,
-) {
-    MLKIT(
-        id = "MLKIT",
-        displayName = "Google ML Kit",
-        subtitle = "Default engine · On-device multilingual recognition",
-    ),
-    PADDLE(
-        id = "PADDLE",
-        displayName = "PaddleOCR",
-        subtitle = "Alternative engine · On-device mobile inference",
-    );
-
-    companion object {
-        fun fromId(id: String): AppOcrEngine =
-            values().firstOrNull { it.id.equals(id, ignoreCase = true) } ?: MLKIT
-    }
-}
 
 /**
  * Common abstraction contract for all on-device OCR engines.
