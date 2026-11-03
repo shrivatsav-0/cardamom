@@ -43,6 +43,14 @@ Target SDK 37, Min SDK 30. \* **Storage Philosophy**: 100% on-device
 storage encrypted with hardware-backed Keystore keys. Zero server
 tracking, zero external telemetry.
 
+### 1.1 Gradle Modularization
+
+The codebase is modularized for rapid incremental compilation, parallel build execution, and clear domain separation:
+* `:core:model`: Lightweight data contracts (`WalletCard`, `WalletDocument`, `CardField`, `CodeFormat`, `AppOcrEngine`).
+* `:core:util`: Low-level system utilities (`Codes`, `Files`, `Auth`, `Favicon`, `Prefs`).
+* `:core:ui`: Shared design system (`Theme`, `CardamomPalette`, `Components`, `Modal`, fonts).
+* `:core:vision`: Machine learning and computer vision pipeline (`OcrEngine`, `AiVisionEngine`, `AiModelManager`, `Importer`).
+* `:app`: Presentation screens, navigation graph, ViewModels, Android widgets, and application manifests.
 ``` mermaid
 graph TD
     subgraph UI [Jetpack Compose UI Layer]
