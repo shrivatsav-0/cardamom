@@ -741,6 +741,8 @@ fun ShareScreen(vm: AppViewModel, id: String, onBack: () -> Unit) {
         return
     }
     val hasCode = card.code.isNotBlank()
+    val hasPhotos = (card.frontImagePath != null && File(card.frontImagePath).exists()) ||
+            (card.backImagePath != null && File(card.backImagePath).exists())
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 28.dp, vertical = 16.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("Share", fontSize = 42.sp, fontWeight = FontWeight.SemiBold)
@@ -750,8 +752,11 @@ fun ShareScreen(vm: AppViewModel, id: String, onBack: () -> Unit) {
         Box(Modifier.padding(top = 32.dp, bottom = 28.dp, start = 16.dp, end = 4.dp).rotate(-6f)) {
             CardTile(card, expanded = include && hasCode, art = vm.illustrations, showCodeText = includeLinkData)
         }
-        ShareOption("Share as image", "PNG of the card", sel == 0) { sel = 0 }
+        ShareOption("Share as image", "PNG of the card (front & back with details)", sel == 0) { sel = 0 }
         ShareOption("Save to gallery", "Keep a copy on this phone", sel == 1) { sel = 1 }
+        if (hasPhotos) {
+            ShareOption("Share scanned photos", "Original front and back photos", sel == 3) { sel = 3 }
+        }
         ShareOption("Export card file", "Import it on another phone", sel == 2) { sel = 2 }
         Spacer(Modifier.height(10.dp))
         ToggleRow(
@@ -770,10 +775,27 @@ fun ShareScreen(vm: AppViewModel, id: String, onBack: () -> Unit) {
         Spacer(Modifier.height(20.dp))
         PrimaryButton("Share", {
             val showData = includeLinkData && include && hasCode
+            val details = Share.cardDetailsText(card)
+            val title = card.name.ifBlank { card.category.ifBlank { "Card" } }
             when (sel) {
-                0 -> { vm.external(); Share.send(ctx, Share.imageFile(ctx, card, include && hasCode, showData), "image/png") }
+                0 -> {
+                    vm.external()
+                    val f = Share.imageFile(ctx, card, include && hasCode, showData)
+                    Share.send(ctx, f, "image/png", subject = title, text = details, chooserTitle = "Share card")
+                }
                 1 -> Share.saveToGallery(ctx, card, include && hasCode, showData)
-                else -> { vm.external(); Share.send(ctx, Share.cardFile(ctx, card), "application/octet-stream") }
+                3 -> {
+                    vm.external()
+                    val files = listOfNotNull(
+                        card.frontImagePath?.let { File(it) },
+                        card.backImagePath?.let { File(it) },
+                    ).filter { it.exists() }
+                    Share.sendMultiple(ctx, files, "image/*", subject = title, text = details, chooserTitle = "Share card photos")
+                }
+                else -> {
+                    vm.external()
+                    Share.send(ctx, Share.cardFile(ctx, card), "application/octet-stream", subject = title, text = details, chooserTitle = "Share card file")
+                }
             }
         })
         Spacer(Modifier.height(12.dp))

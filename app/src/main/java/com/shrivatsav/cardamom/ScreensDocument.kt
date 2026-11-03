@@ -1095,6 +1095,36 @@ fun DocumentDetailScreen(
                 }
             }
         }
+        if (displayDoc.fields.isNotEmpty()) {
+            Spacer(Modifier.height(18.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(C.Surface)
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
+            ) {
+                Text(
+                    text = "ATTRIBUTES",
+                    color = C.Muted,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.5.sp,
+                )
+                Spacer(Modifier.height(10.dp))
+                displayDoc.fields.forEachIndexed { idx, f ->
+                    if (idx > 0) Spacer(Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(f.label, color = C.Muted, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Text(f.value, color = C.Cream, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        }
         Spacer(Modifier.height(28.dp))
 
         // Action buttons: Share (cream pill), Edit (dark pill), Delete (dark pill with red text)
@@ -1105,22 +1135,8 @@ fun DocumentDetailScreen(
             PrimaryButton(
                 text = "Share",
                 onClick = {
-                    val shareFile = when {
-                        displayDoc.pdfPath != null -> File(displayDoc.pdfPath)
-                        displayDoc.pagePaths.isNotEmpty() -> File(displayDoc.pagePaths.first())
-                        else -> File(displayDoc.uriPath)
-                    }
-                    if (shareFile.exists()) {
-                        val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", shareFile)
-                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                            type = displayDoc.mimeType
-                            putExtra(Intent.EXTRA_STREAM, uri)
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        }
-                        ctx.startActivity(Intent.createChooser(shareIntent, "Share document"))
-                    } else {
-                        Toast.makeText(ctx, "File not found on device", Toast.LENGTH_SHORT).show()
-                    }
+                    vm.external()
+                    Share.sendDocument(ctx, displayDoc)
                 },
                 modifier = Modifier.weight(1.2f),
             )

@@ -399,16 +399,8 @@ fun WalletScreen(
                         }
                         "edit" -> onEditDoc(targetDoc.id)
                         "share" -> {
-                            val f = File(targetDoc.uriPath)
-                            if (f.exists()) {
-                                val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", f)
-                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                    type = targetDoc.mimeType
-                                    putExtra(Intent.EXTRA_STREAM, uri)
-                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                }
-                                ctx.startActivity(Intent.createChooser(shareIntent, "Share document"))
-                            }
+                            vm.external()
+                            Share.sendDocument(ctx, targetDoc)
                         }
                         "pin" -> vm.togglePinDoc(targetDoc.id)
                         "details" -> onOpenDoc(targetDoc.id)
@@ -492,10 +484,29 @@ fun CameraPreview(
 }
 
 @Composable
-fun CardFrameOverlay(step: Int, liveCode: String?, isDocument: Boolean = false, isPortraitCard: Boolean = false, modifier: Modifier = Modifier) {
+fun CardFrameOverlay(
+    step: Int,
+    liveCode: String?,
+    isDocument: Boolean = false,
+    isPortraitCard: Boolean = false,
+    isLandscapeDoc: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
     BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.Center) {
-        val cardWidth = if (isDocument) maxWidth * 0.85f else if (isPortraitCard) maxHeight * 0.60f / 1.586f else maxWidth * 0.90f
-        val cardHeight = if (isDocument) cardWidth * 1.35f else if (isPortraitCard) maxHeight * 0.60f else cardWidth / 1.586f
+        val cardWidth = if (isDocument) {
+            if (isLandscapeDoc) maxWidth * 0.90f else maxWidth * 0.85f
+        } else if (isPortraitCard) {
+            maxHeight * 0.60f / 1.586f
+        } else {
+            maxWidth * 0.90f
+        }
+        val cardHeight = if (isDocument) {
+            if (isLandscapeDoc) cardWidth / 1.35f else cardWidth * 1.35f
+        } else if (isPortraitCard) {
+            maxHeight * 0.60f
+        } else {
+            cardWidth / 1.586f
+        }
         val isDetected = !isDocument && liveCode != null
         val borderColor = if (isDetected) Color(0xFFA8D8B4) else Color.White
         val bracketDefaultColor = C.Yellow
@@ -548,7 +559,15 @@ fun CardFrameOverlay(step: Int, liveCode: String?, isDocument: Boolean = false, 
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                text = if (isDocument) "Align document inside frame" else if (isPortraitCard) "Align portrait ID badge inside frame" else if (isDetected) "Barcode detected" else "Align card inside frame",
+                text = if (isDocument) {
+                    if (isLandscapeDoc) "Align horizontal document inside frame" else "Align vertical document inside frame"
+                } else if (isPortraitCard) {
+                    "Align portrait ID badge inside frame"
+                } else if (isDetected) {
+                    "Barcode detected"
+                } else {
+                    "Align card inside frame"
+                },
                 fontSize = 15.sp,
             )
         }
@@ -588,6 +607,7 @@ fun ScanScreen(
     var torchOn by remember { mutableStateOf(false) }
     var isCapturing by remember { mutableStateOf(false) }
     var isPortraitCard by remember { mutableStateOf(false) }
+    var isLandscapeDoc by remember { mutableStateOf(false) }
 
     fun cropCardFrame(): Bitmap? {
         val pv = previewViewRef ?: return null
@@ -595,8 +615,13 @@ fun ScanScreen(
         val targetW: Int
         val targetH: Int
         if (isDocument) {
-            targetW = (full.width * 0.85f).toInt().coerceAtLeast(10)
-            targetH = (targetW * 1.35f).toInt().coerceAtLeast(10)
+            if (isLandscapeDoc) {
+                targetW = (full.width * 0.90f).toInt().coerceAtLeast(10)
+                targetH = (targetW / 1.35f).toInt().coerceAtLeast(10)
+            } else {
+                targetW = (full.width * 0.85f).toInt().coerceAtLeast(10)
+                targetH = (targetW * 1.35f).toInt().coerceAtLeast(10)
+            }
         } else if (isPortraitCard) {
             targetH = (full.height * 0.65f).toInt().coerceAtLeast(10)
             targetW = (targetH / 1.586f).toInt().coerceAtLeast(10)
@@ -636,10 +661,17 @@ fun ScanScreen(
                         fontSize = 13.sp,
                     )
                 } else {
-                    Text("Position document inside frame", color = muted, fontSize = 13.sp)
+                    Text(if (isLandscapeDoc) "Horizontal document" else "Vertical document", color = muted, fontSize = 13.sp)
                 }
             }
-            if (!isDocument) {
+            if (isDocument) {
+                CircleIcon(
+                    if (isLandscapeDoc) Icons.Default.CropLandscape else Icons.Default.CropPortrait,
+                    if (isLandscapeDoc) "Switch to vertical document" else "Switch to horizontal document",
+                    onClick = { isLandscapeDoc = !isLandscapeDoc }
+                )
+                Spacer(Modifier.width(8.dp))
+            } else {
                 CircleIcon(
                     if (isPortraitCard) Icons.Default.CropPortrait else Icons.Default.CropLandscape,
                     if (isPortraitCard) "Switch to landscape card" else "Switch to portrait ID badge",
@@ -672,6 +704,7 @@ fun ScanScreen(
                     liveCode = liveCode,
                     isDocument = isDocument,
                     isPortraitCard = isPortraitCard,
+                    isLandscapeDoc = isLandscapeDoc,
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
@@ -984,5 +1017,5 @@ fun ReviewScreen(vm: AppViewModel, onBack: () -> Unit, onNext: () -> Unit) {
 
         PrimaryButton("Continue", onNext)
         Spacer(Modifier.height(16.dp))
-}
     }
+}
