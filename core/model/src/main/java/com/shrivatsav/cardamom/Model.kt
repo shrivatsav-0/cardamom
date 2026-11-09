@@ -41,8 +41,8 @@ enum class AppOcrEngine(
     ),
     PADDLE(
         id = "PADDLE",
-        displayName = "PaddleOCR",
-        subtitle = "Alternative engine · On-device mobile inference",
+        displayName = "PaddleOCR (Experimental)",
+        subtitle = "Experimental — currently falls back to ML Kit recognition",
     );
 
     companion object {

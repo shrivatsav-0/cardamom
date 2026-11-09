@@ -37,9 +37,9 @@ class SupportAndDonationTest {
             val bitmap = com.google.zxing.BinaryBitmap(com.google.zxing.common.HybridBinarizer(source))
             try {
                 val result = com.google.zxing.MultiFormatReader().decode(bitmap)
-                println("DECODED_QR_DATA: " + result.text)
+                assertTrue(result.text.isNotBlank())
             } catch (e: Exception) {
-                println("ZXING decode failed: " + e.message)
+                // QR decode is best-effort in this test; no data is logged.
             }
         }
     }

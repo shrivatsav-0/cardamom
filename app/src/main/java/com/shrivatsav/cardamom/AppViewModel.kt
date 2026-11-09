@@ -15,6 +15,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = CardRepository(app)
     private val prefs = Prefs(app)
 
+    private val distribution = DistributionBridge.createController(app, prefs, viewModelScope)
+
+    val licenseState: LicenseState get() = distribution.licenseState
+    val isPaywallLocked: Boolean get() = distribution.isPaywallLocked
+    var showPurchaseSuccess: Boolean
+        get() = distribution.showPurchaseSuccess
+        set(value) { distribution.showPurchaseSuccess = value }
+    val showTrialEndingSheet: Boolean get() = distribution.showTrialEndingSheet
+    val premiumPrice: String get() = distribution.premiumPrice
+
     val cards = repo.cards
     private val docRepo = DocumentRepository(app)
     val documents = docRepo.documents
@@ -121,7 +131,37 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 locked = true
             }
         }
+        distribution.onForeground()
         checkPeriodicSupportPrompt()
+    }
+
+    fun startTrial() {
+        distribution.startTrial()
+    }
+
+    fun launchBilling(activity: android.app.Activity) {
+        distribution.launchBilling(activity)
+    }
+
+    fun restorePurchase(onResult: (Boolean) -> Unit) {
+        distribution.restorePurchase(onResult)
+    }
+
+    fun checkTrialEndingPrompt() {
+        distribution.checkTrialEndingPrompt()
+    }
+
+    fun dismissTrialEndingSheet() {
+        distribution.dismissTrialEndingSheet()
+    }
+
+    fun dismissPurchaseSuccess() {
+        distribution.dismissPurchaseSuccess()
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        distribution.destroy()
     }
     fun checkPeriodicSupportPrompt() {
         if (!onboarded || locked) return
@@ -155,7 +195,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             pinnedCardId = null
             prefs.pinnedCardId = null
         }
-        repo.delete(id)
+        pendingDeletedCard = repo.delete(id)
+    }
+
+    // Undo-delete: files were moved to trash/, not destroyed.
+    var pendingDeletedCard: WalletCard? = null
+        private set
+    var pendingDeletedDoc: WalletDocument? = null
+        private set
+
+    fun undoDeleteCard() {
+        pendingDeletedCard?.let { repo.restore(it) }
+        pendingDeletedCard = null
+    }
+
+    fun undoDeleteDoc() {
+        pendingDeletedDoc?.let { docRepo.restore(it) }
+        pendingDeletedDoc = null
     }
 
     fun togglePinCard(id: String) {
@@ -172,7 +228,45 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             pinnedDocId = null
             prefs.pinnedDocId = null
         }
-        docRepo.delete(id)
+        pendingDeletedDoc = docRepo.delete(id)
+    }
+
+    /**
+     * Wipe all vault data: clears card/document records AND deletes every
+     * stored file (photos, doc pages, originals, logos, avatars, models),
+     * then resets local prefs. This is the in-app data-deletion path —
+     * uninstall alone should not be the only way to erase your data.
+     */
+    fun wipeAllData() {
+        // Delete per-item files first (repo.delete removes files per item),
+        // then clear the encrypted records themselves.
+        cards.value.map { it.id }.toList().forEach { runCatching { repo.delete(it) } }
+        documents.value.map { it.id }.toList().forEach { runCatching { docRepo.delete(it) } }
+        repo.saveAll(emptyList())
+        docRepo.saveAll(emptyList())
+        // Belt-and-braces: remove any orphaned files left in app storage,
+        // including the undo trash (wipe must be a true erase, not a move).
+        runCatching {
+            val dir = getApplication<Application>().filesDir
+            dir.listFiles()?.forEach { f ->
+                if (f.isDirectory) f.deleteRecursively() else f.delete()
+            }
+        }
+        // Reset preferences (onboarding, pins, trial/premium flags, lock).
+        // Includes the EncryptedSharedPreferences file ("cardamom_secure").
+        runCatching {
+            getApplication<Application>()
+                .getSharedPreferences("cardamom", android.content.Context.MODE_PRIVATE)
+                .edit().clear().commit()
+            getApplication<Application>()
+                .getSharedPreferences("cardamom_secure", android.content.Context.MODE_PRIVATE)
+                .edit().clear().commit()
+            getApplication<Application>()
+                .getSharedPreferences("cardamom_widgets", android.content.Context.MODE_PRIVATE)
+                .edit().clear().commit()
+        }
+        pinnedCardId = null
+        pinnedDocId = null
     }
 
     fun togglePinDoc(id: String) {
@@ -237,29 +331,62 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         return fresh.size
     }
 
+    /** Restore document metadata from a backup (page images must be re-scanned). */
+    fun importDocuments(list: List<WalletDocument>): Int {
+        val have = documents.value.map { it.id }.toSet()
+        val fresh = list.filter { it.id !in have }
+        fresh.forEach { docRepo.upsert(it) }
+        return fresh.size
+    }
+
+    fun importDocumentFromUri(uri: Uri, onDone: () -> Unit) {
+        viewModelScope.launch {
+            busyText = "Importing document..."
+            try {
+                val ctx = getApplication<Application>()
+                val processed = withContext(Dispatchers.IO) {
+                    DocumentEngine.importDocument(ctx, uri)
+                }
+                if (processed != null) {
+                    val doc = processed.toWalletDocument()
+                    if (processed.bitmaps.isNotEmpty()) {
+                        val aiResult = withContext(Dispatchers.Default) {
+                            AiVisionEngine.processBitmaps(ctx, processed.bitmaps)
+                        }
+                        if (aiResult is AiVisionResult.Success && aiResult.issuer.isNotBlank()) {
+                            draftDoc = doc.copy(issuer = aiResult.issuer)
+                        } else {
+                            draftDoc = doc
+                        }
+                    } else {
+                        draftDoc = doc
+                    }
+                    onDone()
+                } else {
+                    android.widget.Toast.makeText(ctx, "Could not read this document", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                android.widget.Toast.makeText(getApplication<Application>(), "Couldn't read document: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+            } finally {
+                busyText = null
+            }
+        }
+    }
+
     fun importUri(uri: Uri, isDocument: Boolean = false, onDone: () -> Unit) {
+        if (isDocument) {
+            importDocumentFromUri(uri, onDone)
+            return
+        }
         viewModelScope.launch {
             busyText = "Reading file on your phone"
             try {
                 val d = withContext(Dispatchers.Default) { Importer.analyze(getApplication<Application>(), uri) }
                 detected = d
-                draft = d.card.copy(isDocument = isDocument)
-                if (isDocument) {
-                    draftDoc = WalletDocument(
-                        id = d.card.id,
-                        title = "",
-                        docType = "Document",
-                        issuer = d.card.issuer,
-                        uriPath = d.card.frontImagePath ?: "",
-                        mimeType = "image/jpeg",
-                        pageCount = 1,
-                        pagePaths = listOfNotNull(d.card.frontImagePath),
-                        fields = d.card.fields,
-                    )
-                }
+                draft = d.card.copy(isDocument = false)
                 onDone()
             } catch (e: Exception) {
-                android.widget.Toast.makeText(getApplication<Application>(), "Couldn't read that file", android.widget.Toast.LENGTH_SHORT).show()
+                android.widget.Toast.makeText(getApplication<Application>(), "Couldn't read that file: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
             } finally {
                 busyText = null
             }
@@ -307,7 +434,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 withContext(Dispatchers.IO) {
                     bitmaps.forEachIndexed { i, bmp ->
                         val pageFile = java.io.File(docDir, "doc_${id}_page_$i.jpg")
-                        pageFile.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, it) }
+                        VaultCrypto.compressEncryptedBitmap(pageFile, bmp, android.graphics.Bitmap.CompressFormat.JPEG, 90)
                         pagePaths.add(pageFile.absolutePath)
                     }
                 }
@@ -359,9 +486,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         ctx.contentResolver.openInputStream(uri)?.use { input ->
                             dest.outputStream().use { output -> input.copyTo(output) }
                         }
+                        // Encrypt the stored page copy at rest (readers decrypt on load)
+                        try { VaultCrypto.writeEncryptedBytes(dest, dest.readBytes()) } catch (_: Exception) {}
                         if (dest.exists() && dest.length() > 0) {
                             pagePaths.add(dest.absolutePath)
-                            android.graphics.BitmapFactory.decodeFile(dest.absolutePath)?.let { bitmaps.add(it) }
+                            VaultCrypto.decodeBitmapFile(dest)?.let { bitmaps.add(it) }
                         }
                     }
                 }
@@ -404,25 +533,33 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val ctx = getApplication<Application>()
             val docDir = Files.dir(ctx, "documents")
             val newPaths = mutableListOf<String>()
-            val startIndex = cur.pagePaths.size
+            var nextIndex = cur.pagePaths.size
             withContext(Dispatchers.IO) {
-                newUris.forEachIndexed { i, uri ->
-                    val dest = java.io.File(docDir, "doc_${cur.id}_page_${startIndex + i}.jpg")
-                    ctx.contentResolver.openInputStream(uri)?.use { input ->
-                        dest.outputStream().use { output -> input.copyTo(output) }
-                    }
-                    if (dest.exists() && dest.length() > 0) {
-                        newPaths.add(dest.absolutePath)
+                newUris.forEach { uri ->
+                    val stream = DocumentEngine.openUriStream(ctx, uri)
+                    if (stream != null) {
+                        val temp = java.io.File(docDir, "temp_add_${java.util.UUID.randomUUID()}")
+                        stream.use { input -> temp.outputStream().use { output -> input.copyTo(output) } }
+                        val pages = DocumentEngine.renderFilePages(temp)
+                        temp.delete()
+                        for (bmp in pages) {
+                            val dest = java.io.File(docDir, "doc_${cur.id}_page_$nextIndex.jpg")
+                            VaultCrypto.compressEncryptedBitmap(dest, bmp, android.graphics.Bitmap.CompressFormat.JPEG, 90)
+                            newPaths.add(dest.absolutePath)
+                            nextIndex++
+                        }
                     }
                 }
             }
-            val updatedPaths = cur.pagePaths + newPaths
-            val totalSize = updatedPaths.sumOf { java.io.File(it).length() }
-            draftDoc = cur.copy(
-                pagePaths = updatedPaths,
-                pageCount = updatedPaths.size,
-                fileSize = totalSize,
-            )
+            if (newPaths.isNotEmpty()) {
+                val updatedPaths = cur.pagePaths + newPaths
+                val totalSize = updatedPaths.sumOf { java.io.File(it).length() }
+                draftDoc = cur.copy(
+                    pagePaths = updatedPaths,
+                    pageCount = updatedPaths.size,
+                    fileSize = totalSize,
+                )
+            }
         }
     }
 

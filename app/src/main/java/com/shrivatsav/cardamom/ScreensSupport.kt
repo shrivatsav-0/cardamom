@@ -378,7 +378,8 @@ fun PeriodicSupportModal(
 }
 
 /**
- * Onboarding N-1 page: Meet the developer, networking links, and donation box.
+ * Onboarding N-1 page: Meet the developer & networking links.
+ * Designed to fit completely within one screen without scrolling.
  */
 @Composable
 fun OnboardingDeveloperSupportScreen(
@@ -392,43 +393,41 @@ fun OnboardingDeveloperSupportScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(horizontal = 28.dp, vertical = 24.dp),
+            .background(C.Bg)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(horizontal = 24.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.SpaceBetween,
     ) {
-        TopBar("", onBack)
+        Column(modifier = Modifier.fillMaxWidth()) {
+            TopBar("", onBack)
 
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .verticalScroll(rememberScrollState()),
-        ) {
+            Spacer(Modifier.height(4.dp))
+
             Text(
-                "A note from\nthe developer",
-                fontSize = 38.sp,
-                lineHeight = 42.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(top = 8.dp),
+                "Meet the\ndeveloper",
+                fontSize = 34.sp,
+                lineHeight = 38.sp,
+                fontWeight = FontWeight.Bold,
+                color = C.Cream,
             )
 
             // Message box
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 16.dp)
+                    .padding(top = 12.dp, bottom = 16.dp)
                     .clip(RoundedCornerShape(18.dp))
                     .background(C.Surface)
-                    .padding(16.dp),
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
             ) {
-                Column {
-                    Text(
-                        "Hi there! I am a college student and need networking. If you'd like to reach out, feel free to email me, connect on LinkedIn, or check out my website!",
-                        color = C.Cream,
-                        fontSize = 14.sp,
-                        lineHeight = 20.sp,
-                    )
-                }
+                Text(
+                    "Hi there! I am a college student building Cardamom independently. I'd love to connect, get feedback, and network!",
+                    color = C.Cream,
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp,
+                )
             }
-
-            Spacer(Modifier.height(20.dp))
 
             // Socials & Networking Section
             Text(
@@ -437,25 +436,25 @@ fun OnboardingDeveloperSupportScreen(
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
                 letterSpacing = 1.sp,
+                modifier = Modifier.padding(bottom = 8.dp),
             )
-            Spacer(Modifier.height(10.dp))
 
             Group {
-                SettingLinkRow(
-                    title = "Email",
-                    subtitle = SupportLinks.EMAIL,
-                    onClick = {
-                        vm.external()
-                        SupportLinks.sendEmail(ctx)
-                    },
-                )
-                Sep()
                 SettingLinkRow(
                     title = "LinkedIn",
                     subtitle = SupportLinks.LINKEDIN_DISPLAY,
                     onClick = {
                         vm.external()
                         SupportLinks.openUrl(ctx, SupportLinks.LINKEDIN)
+                    },
+                )
+                Sep()
+                SettingLinkRow(
+                    title = "GitHub",
+                    subtitle = SupportLinks.GITHUB_DISPLAY,
+                    onClick = {
+                        vm.external()
+                        SupportLinks.openUrl(ctx, SupportLinks.GITHUB)
                     },
                 )
                 Sep()
@@ -469,115 +468,60 @@ fun OnboardingDeveloperSupportScreen(
                 )
                 Sep()
                 SettingLinkRow(
-                    title = "GitHub",
-                    subtitle = SupportLinks.GITHUB_DISPLAY,
+                    title = "Email",
+                    subtitle = SupportLinks.EMAIL,
                     onClick = {
                         vm.external()
-                        SupportLinks.openUrl(ctx, SupportLinks.GITHUB)
+                        SupportLinks.sendEmail(ctx)
                     },
                 )
             }
 
-            Spacer(Modifier.height(22.dp))
-
-            // Donations Section
-            Text(
-                "SUPPORT & DONATIONS",
-                color = C.Muted,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 1.sp,
-            )
             Spacer(Modifier.height(10.dp))
 
-            Box(
+            // Subtle optional support row
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(22.dp))
+                    .clip(RoundedCornerShape(14.dp))
                     .background(C.Surface)
-                    .padding(16.dp),
+                    .clickable { showQrModal = true }
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column {
-                    Text(
-                        "Donation Box",
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 16.sp,
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Favorite,
+                        contentDescription = null,
+                        tint = C.Orange,
+                        modifier = Modifier.size(16.dp),
                     )
+                    Spacer(Modifier.width(10.dp))
                     Text(
-                        "Cardamom has no ads or subscriptions. If you enjoy the app, tips are greatly appreciated!",
-                        color = C.Muted,
+                        "Want to support Cardamom?",
                         fontSize = 13.sp,
-                        lineHeight = 18.sp,
-                        modifier = Modifier.padding(top = 4.dp, bottom = 14.dp),
+                        color = C.Muted,
                     )
-
-                    // Ko-fi Button
-                    SecondaryButton(
-                        text = "Support via Ko-fi",
-                        onClick = {
-                            vm.external()
-                            SupportLinks.openUrl(ctx, SupportLinks.KOFI)
-                        },
-                        modifier = Modifier.height(46.dp),
-                    )
-
-                    Spacer(Modifier.height(12.dp))
-
-                    // UPI Box
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(C.Bg)
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("UPI ID", color = C.Muted, fontSize = 11.sp)
-                            Text(
-                                SupportLinks.UPI_ID,
-                                color = C.Cream,
-                                fontSize = 13.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        Spacer(Modifier.width(6.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(C.Surface)
-                                    .clickable {
-                                        SupportLinks.copy(ctx, "UPI ID", SupportLinks.UPI_ID)
-                                    }
-                                    .padding(horizontal = 8.dp, vertical = 5.dp),
-                            ) {
-                                Text("Copy", color = C.Yellow, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(C.Surface)
-                                    .clickable { showQrModal = true }
-                                    .padding(horizontal = 8.dp, vertical = 5.dp),
-                            ) {
-                                Text("QR", color = C.Yellow, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                            }
-                        }
-                    }
                 }
+                Text(
+                    "Donate",
+                    color = C.Yellow,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                )
             }
-
-            Spacer(Modifier.height(16.dp))
         }
 
-        Dots(4, total = 6)
-        Spacer(Modifier.height(18.dp))
-        PrimaryButton("Continue", onClick = onNext)
+        // Bottom Navigation (Cleanly positioned above the system navigation bar)
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Dots(active = if (DistributionBridge.hasOnboardingPaywall) 5 else 4, total = DistributionBridge.onboardingTotalSteps)
+            Spacer(Modifier.height(18.dp))
+            PrimaryButton("Continue", onClick = onNext)
+        }
     }
 
     if (showQrModal) {

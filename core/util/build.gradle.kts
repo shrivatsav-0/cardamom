@@ -12,6 +12,9 @@ android {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
   }
+  testOptions {
+    unitTests.isReturnDefaultValues = true
+  }
 }
 
 kotlin {
@@ -24,6 +27,7 @@ dependencies {
   implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
   implementation("androidx.biometric:biometric:1.1.0")
   implementation("androidx.fragment:fragment-ktx:1.8.5")
+  implementation("androidx.security:security-crypto:1.1.0")
   implementation(libs.androidx.core.ktx)
   testImplementation(libs.junit)
 }

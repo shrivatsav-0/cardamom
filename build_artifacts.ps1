@@ -64,7 +64,21 @@ param (
     [switch]$PrintNotesTemplate,
 
     [Parameter()]
-    [switch]$Publish
+    [switch]$Publish,
+
+    [Parameter()]
+    [switch]$UploadPlayStore,
+
+    [Parameter()]
+    [string]$PlayStoreKey = "",
+
+    [Parameter()]
+    [ValidateSet("internal", "alpha", "beta", "production")]
+    [string]$PlayTrack = "internal",
+
+    [Parameter()]
+    [ValidateSet("completed", "draft", "inProgress")]
+    [string]$PlayStatus = "completed"
 )
 
 $ErrorActionPreference = "Stop"
@@ -398,7 +412,7 @@ if ($Variant -eq "github" -or $Variant -eq "all") {
     if (-not (Test-Path $GithubOutDir)) { New-Item -ItemType Directory -Path $GithubOutDir -Force | Out-Null }
 
     if ($BuildType -eq "release") {
-        $abis = @("arm64-v8a", "armeabi-v7a", "x86_64")
+        $abis = @("arm64-v8a", "armeabi-v7a", "x86_64", "x86", "universal")
         $checksumLines = [System.Collections.Generic.List[string]]::new()
         $githubArtifactsList = [System.Collections.Generic.List[hashtable]]::new()
 
@@ -420,7 +434,8 @@ if ($Variant -eq "github" -or $Variant -eq "all") {
                     size = (Get-Item $dstSplit).Length
                 })
 
-                $ArtifactRecords.Add([PSCustomObject]@{ Variant = "GitHub"; Name = $dstSplitName; Type = "Split APK ($abi)"; SHA256 = $sha; SizeMB = [math]::Round((Get-Item $dstSplit).Length / 1MB, 2) })
+                $typeLabel = if ($abi -eq "universal") { "Universal APK" } else { "Split APK ($abi)" }
+                $ArtifactRecords.Add([PSCustomObject]@{ Variant = "GitHub"; Name = $dstSplitName; Type = $typeLabel; SHA256 = $sha; SizeMB = [math]::Round((Get-Item $dstSplit).Length / 1MB, 2) })
             }
         }
 
@@ -515,5 +530,25 @@ if ($Publish) {
         $ghArgs = @("release", "create", "v$NextVersion") + $filesToUpload + @("--title", "Cardamom v$NextVersion", "--notes-file", $ghNotes)
         Write-Host "Executing: gh $($ghArgs -join ' ')"
         & gh @ghArgs
+    }
+}
+
+if ($UploadPlayStore -or $PlayStoreKey) {
+    if ($Variant -eq "play" -or $Variant -eq "all") {
+        Write-Host ""
+        Write-Host "=== Uploading Play Store AAB Bundle ===" -ForegroundColor Yellow
+        $aabFile = Join-Path $OutRoot "play\Cardamom-v$NextVersion-play.aab"
+        $notesFile = Join-Path $OutRoot "play\playstore_release_notes.txt"
+        $uploadScript = Join-Path $RootDir "scripts\upload_playstore.ps1"
+        $uploadParams = @{
+            AabPath = $aabFile
+            Track = $PlayTrack
+            Status = $PlayStatus
+            ReleaseNotesPath = $notesFile
+        }
+        if ($PlayStoreKey) {
+            $uploadParams["ServiceAccountKeyPath"] = $PlayStoreKey
+        }
+        & $uploadScript @uploadParams
     }
 }

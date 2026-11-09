@@ -21,15 +21,19 @@ BUMP="patch"
 SKIP_TESTS=false
 GEN_NOTES=false
 PUBLISH=false
+UPLOAD_PLAYSTORE=false
+PLAYSTORE_KEY=""
+PLAY_TRACK="internal"
+PLAY_STATUS="completed"
 PLAYSTORE_MAX_CHARS=500
 
 usage() {
   cat <<'USAGE'
-Usage: build_artifacts.sh [release|debug] [--variant play|github|all] [--bump none|patch|minor|major] [--skip-tests] [--generate-notes] [--publish]
+Usage: build_artifacts.sh [release|debug] [--variant play|github|all] [--bump none|patch|minor|major] [--skip-tests] [--generate-notes] [--publish] [--upload-playstore] [--playstore-key <path>] [--track <internal|alpha|beta|production>]
 
   --variant <target>   Target distribution channel (alias: --platform). Default: 'all'.
                        play    Google Play Store (signed AAB + release APK)
-                       github  Split APKs for GitHub Releases (arm64-v8a, armeabi-v7a, x86_64)
+                       github  Split APKs for GitHub Releases (arm64-v8a, armeabi-v7a, x86_64, x86, universal)
                        all     Both variants
 
   --bump <component>   How to change versionName before building. Default: 'patch'.
@@ -42,6 +46,9 @@ Usage: build_artifacts.sh [release|debug] [--variant play|github|all] [--bump no
   --generate-notes     Create or refresh default playstore_release_notes.txt.
   --print-notes-template Print release notes guidelines and template.
   --publish            Publish GitHub release via gh CLI.
+  --upload-playstore   Upload Play Store AAB automatically via Android Publisher API.
+  --playstore-key <f>  Path to Google Cloud Service Account JSON key.
+  --track <track>      Target Google Play track (default: internal).
 USAGE
 }
 
@@ -77,6 +84,13 @@ while [[ $# -gt 0 ]]; do
     --generate-notes) GEN_NOTES=true ;;
     --print-notes-template) print_notes_template; exit 0 ;;
     --publish) PUBLISH=true ;;
+    --upload-playstore) UPLOAD_PLAYSTORE=true ;;
+    --playstore-key) shift; PLAYSTORE_KEY="${1:-}" ;;
+    --playstore-key=*) PLAYSTORE_KEY="${1#*=}" ;;
+    --track) shift; PLAY_TRACK="${1:-internal}" ;;
+    --track=*) PLAY_TRACK="${1#*=}" ;;
+    --status) shift; PLAY_STATUS="${1:-completed}" ;;
+    --status=*) PLAY_STATUS="${1#*=}" ;;
     -h|--help) usage; exit 0 ;;
     *)
       echo "Error: unknown argument '$1'" >&2
@@ -290,7 +304,9 @@ if [[ "$VARIANT" == "github" || "$VARIANT" == "all" ]]; then
   mkdir -p "$GITHUB_OUT"
   if [[ "$BUILD_TYPE" == "release" ]]; then
     CHECKSUMS=()
-    for abi in arm64-v8a armeabi-v7a x86_64; do
+    ARTIFACT_JSONS=()
+    TABLE_ROWS=""
+    for abi in arm64-v8a armeabi-v7a x86_64 x86 universal; do
       SRC_SPLIT="$ROOT_DIR/app/build/outputs/apk/github/release/app-github-$abi-release.apk"
       DST_NAME="Cardamom-v$NEXT_VER-$abi.apk"
       DST_SPLIT="$GITHUB_OUT/$DST_NAME"
@@ -299,6 +315,9 @@ if [[ "$VARIANT" == "github" || "$VARIANT" == "all" ]]; then
         SHA="$(get_sha256 "$DST_SPLIT")"
         echo "$SHA  $DST_NAME" > "$DST_SPLIT.sha256"
         CHECKSUMS+=("$SHA  $DST_NAME")
+        SIZE_HUMAN="$(du -h "$DST_SPLIT" | awk '{print $1}')"
+        TABLE_ROWS+=$'\n'"| \`$abi\` | $DST_NAME | $SIZE_HUMAN | \`$SHA\` |"
+        ARTIFACT_JSONS+=("    { \"abi\": \"$abi\", \"file\": \"$DST_NAME\", \"sha256\": \"$SHA\" }")
       fi
     done
     printf "%s\n" "${CHECKSUMS[@]}" > "$GITHUB_OUT/SHA256SUMS.txt"
@@ -314,19 +333,17 @@ $(tail -n +3 "$NOTES_SRC")
 ### Downloads & Checksums
 
 | Architecture | APK Package | Size | SHA-256 |
-| :--- | :--- | :--- | :--- |
-| \`arm64-v8a\` | Cardamom-v$NEXT_VER-arm64-v8a.apk | $(du -h "$GITHUB_OUT/Cardamom-v$NEXT_VER-arm64-v8a.apk" | awk '{print $1}') | \`$(get_sha256 "$GITHUB_OUT/Cardamom-v$NEXT_VER-arm64-v8a.apk")\` |
-| \`armeabi-v7a\` | Cardamom-v$NEXT_VER-armeabi-v7a.apk | $(du -h "$GITHUB_OUT/Cardamom-v$NEXT_VER-armeabi-v7a.apk" | awk '{print $1}') | \`$(get_sha256 "$GITHUB_OUT/Cardamom-v$NEXT_VER-armeabi-v7a.apk")\` |
-| \`x86_64\` | Cardamom-v$NEXT_VER-x86_64.apk | $(du -h "$GITHUB_OUT/Cardamom-v$NEXT_VER-x86_64.apk" | awk '{print $1}') | \`$(get_sha256 "$GITHUB_OUT/Cardamom-v$NEXT_VER-x86_64.apk")\` |
+| :--- | :--- | :--- | :--- |$TABLE_ROWS
 
-> **Note:** Most modern Android devices (2018+) require \`arm64-v8a\`. Emulators typically use \`x86_64\`.
+> **Note:** Most modern Android devices (2018+) require \`arm64-v8a\`. Emulators typically use \`x86_64\`. For other devices or general usage, download \`universal\`.
 
 ---
-*100% Offline-First | AES-256-GCM Vault Encryption | Apache 2.0*
+*100% Offline-First | Free & Open Source | AES-256-GCM Vault Encryption | Apache 2.0*
 MD
 
     # Generate update.json
     NOW_UTC="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    JOINED_ARTIFACTS=$(IFS=$',\n'; echo "${ARTIFACT_JSONS[*]}")
     cat > "$GITHUB_OUT/update.json" <<JSON
 {
   "versionName": "$NEXT_VER",
@@ -334,9 +351,7 @@ MD
   "minSdk": $(read_min_sdk),
   "publishedAt": "$NOW_UTC",
   "artifacts": [
-    { "abi": "arm64-v8a", "file": "Cardamom-v$NEXT_VER-arm64-v8a.apk", "sha256": "$(get_sha256 "$GITHUB_OUT/Cardamom-v$NEXT_VER-arm64-v8a.apk")" },
-    { "abi": "armeabi-v7a", "file": "Cardamom-v$NEXT_VER-armeabi-v7a.apk", "sha256": "$(get_sha256 "$GITHUB_OUT/Cardamom-v$NEXT_VER-armeabi-v7a.apk")" },
-    { "abi": "x86_64", "file": "Cardamom-v$NEXT_VER-x86_64.apk", "sha256": "$(get_sha256 "$GITHUB_OUT/Cardamom-v$NEXT_VER-x86_64.apk")" }
+$JOINED_ARTIFACTS
   ]
 }
 JSON
@@ -359,3 +374,18 @@ echo "2. Create git release tag:"
 echo "   git tag v$NEXT_VER"
 echo "   git push origin main --tags"
 echo ""
+
+if [[ "$UPLOAD_PLAYSTORE" == "true" || -n "$PLAYSTORE_KEY" || -n "${PLAY_STORE_JSON_KEY:-}" ]]; then
+  if [[ "$VARIANT" == "play" || "$VARIANT" == "all" ]]; then
+    echo "=== Uploading Play Store AAB Bundle ==="
+    AAB_FILE="$OUT_ROOT/play/Cardamom-v$NEXT_VER-play.aab"
+    NOTES_FILE="$OUT_ROOT/play/playstore_release_notes.txt"
+    if command -v python3 >/dev/null 2>&1; then
+      python3 "$ROOT_DIR/scripts/upload_playstore.py" --aab "$AAB_FILE" --track "$PLAY_TRACK" --status "$PLAY_STATUS" --notes "$NOTES_FILE" ${PLAYSTORE_KEY:+--key "$PLAYSTORE_KEY"}
+    elif command -v pwsh >/dev/null 2>&1; then
+      pwsh -File "$ROOT_DIR/scripts/upload_playstore.ps1" -AabPath "$AAB_FILE" -Track "$PLAY_TRACK" -Status "$PLAY_STATUS" -ReleaseNotesPath "$NOTES_FILE" ${PLAYSTORE_KEY:+-ServiceAccountKeyPath "$PLAYSTORE_KEY"}
+    else
+      echo "::warning ::Neither python3 nor pwsh found for direct Play Store upload. Use GitHub Actions with upload-google-play action or run scripts/upload_playstore.ps1 manually."
+    fi
+  fi
+fi

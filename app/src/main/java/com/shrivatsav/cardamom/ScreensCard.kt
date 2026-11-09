@@ -244,7 +244,7 @@ fun EditScreen(vm: AppViewModel, id: String, onBack: () -> Unit, onSaved: (Strin
                     card = card.copy(name = card.issuer.ifBlank { if (card.isDocument) "Document" else "Card" })
                 }
                 if (!keepOriginal && card.originalPath != null) {
-                    File(card.originalPath).delete()
+                    card.originalPath?.let { File(it).delete() }
                     card = card.copy(originalPath = null, originalName = null, originalMime = null)
                 }
                 if (card.logoMode == LogoMode.AUTO && card.website.isNotBlank() && vm.fetchLogos && card.logoPath == null) {
@@ -363,10 +363,10 @@ fun DetailScreen(vm: AppViewModel, id: String, onBack: () -> Unit, onEdit: () ->
     var activeViewerMime by remember { mutableStateOf<String?>(null) }
 
     val frontBmp = remember(displayCard.frontImagePath) {
-        displayCard.frontImagePath?.let { BitmapFactory.decodeFile(it) }
+        displayCard.frontImagePath?.let { VaultCrypto.decodeBitmapPath(it) }
     }
     val backBmp = remember(displayCard.backImagePath) {
-        displayCard.backImagePath?.let { BitmapFactory.decodeFile(it) }
+        displayCard.backImagePath?.let { VaultCrypto.decodeBitmapPath(it) }
     }
     val hasPhotoOrFile = (frontBmp != null) || (backBmp != null) || (displayCard.originalPath != null)
 
@@ -671,8 +671,11 @@ fun DetailScreen(vm: AppViewModel, id: String, onBack: () -> Unit, onEdit: () ->
         if (displayCard.originalPath != null) {
             Row(
                 Modifier.fillMaxWidth().padding(top = 12.dp).clip(RoundedCornerShape(20.dp)).background(C.Surface)
-                    .clickable { showFileViewer = true }.padding(horizontal = 18.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .clickable {
+                        activeViewerPath = displayCard.originalPath
+                        activeViewerName = displayCard.originalName ?: "Original file"
+                        activeViewerMime = displayCard.originalMime
+                    }.padding(horizontal = 18.dp, vertical = 12.dp),
             ) {
                 Column(Modifier.weight(1f)) {
                     Text("Original file", fontSize = 16.sp, maxLines = 1)
@@ -741,8 +744,8 @@ fun ShareScreen(vm: AppViewModel, id: String, onBack: () -> Unit) {
         return
     }
     val hasCode = card.code.isNotBlank()
-    val hasPhotos = (card.frontImagePath != null && File(card.frontImagePath).exists()) ||
-            (card.backImagePath != null && File(card.backImagePath).exists())
+    val hasPhotos = (card.frontImagePath?.let { File(it).exists() } == true) ||
+            (card.backImagePath?.let { File(it).exists() } == true)
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 28.dp, vertical = 16.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("Share", fontSize = 42.sp, fontWeight = FontWeight.SemiBold)
@@ -812,36 +815,12 @@ fun InAppFileViewerDialog(
     val file = remember(filePath) { File(filePath) }
     val pdfPages = remember(filePath) {
         if (!file.exists()) emptyList<Bitmap>()
-        else {
-            try {
-                val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-                val renderer = PdfRenderer(pfd)
-                val count = minOf(renderer.pageCount, 20)
-                val pages = (0 until count).map { i ->
-                    val page = renderer.openPage(i)
-                    val scale = minOf(1200f / page.width.coerceAtLeast(1), 2f).coerceAtLeast(1f)
-                    val w = (page.width * scale).toInt()
-                    val h = (page.height * scale).toInt()
-                    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-                    bmp.eraseColor(android.graphics.Color.WHITE)
-                    val canvas = android.graphics.Canvas(bmp)
-                    canvas.drawColor(android.graphics.Color.WHITE)
-                    page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                    page.close()
-                    bmp
-                }
-                renderer.close()
-                pfd.close()
-                pages
-            } catch (e: Exception) {
-                emptyList()
-            }
-        }
+        else DocumentEngine.renderFilePages(file)
     }
 
     val imageBmp = remember(filePath, pdfPages) {
         if (pdfPages.isNotEmpty() || !file.exists()) null
-        else BitmapFactory.decodeFile(file.absolutePath)
+        else VaultCrypto.decodeBitmapFile(file)
     }
 
     Dialog(

@@ -69,6 +69,30 @@ object Codes {
 }
 
 object Files {
+    const val MAX_IMPORT_BYTES = 50_000_000L
+
+    /** Bounded copy: throws if the stream exceeds [max] bytes (disk-fill / OOM guard). */
+    fun copyBounded(input: InputStream, output: java.io.OutputStream, max: Long = MAX_IMPORT_BYTES) {
+        val buf = ByteArray(32 * 1024)
+        var total = 0L
+        while (true) {
+            val n = input.read(buf)
+            if (n < 0) break
+            total += n
+            require(total <= max) { "import exceeds size limit" }
+            output.write(buf, 0, n)
+        }
+    }
+
+    /** Decode with dimension cap to avoid bitmap bombs. */
+    fun decodeBounded(bytes: ByteArray, maxPixels: Long = 25_000_000L): Bitmap? {
+        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+        if (opts.outWidth <= 0 || opts.outHeight <= 0) return null
+        require(opts.outWidth.toLong() * opts.outHeight <= maxPixels) { "image too large" }
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+    }
+
     fun dir(ctx: Context, n: String): File = File(ctx.filesDir, n).also { it.mkdirs() }
 
     fun displayName(ctx: Context, uri: Uri): String =
@@ -77,37 +101,59 @@ object Files {
             if (i >= 0 && c.moveToFirst()) c.getString(i) else null
         } ?: "file"
 
-    /** Copies the imported image/PDF into app storage. Returns (path, display name, mime). */
+    /** Copies the imported file/PDF/document into app storage. Returns (path, display name, mime). */
     fun copyOriginal(ctx: Context, id: String, uri: Uri): Triple<String, String, String>? {
+        val dName = displayName(ctx, uri)
+        val rawExt = dName.substringAfterLast('.', "").lowercase()
         val mime = ctx.contentResolver.getType(uri) ?: "application/octet-stream"
-        val ext = when { mime.contains("pdf") -> "pdf"; mime.contains("png") -> "png"; else -> "jpg" }
+        val stream = DocumentEngine.openUriStream(ctx, uri) ?: return null
+        val temp = File(dir(ctx, "originals"), "temp_$id")
+        stream.use { i -> temp.outputStream().use { o -> copyBounded(i, o) } }
+        if (!temp.exists() || temp.length() == 0L) {
+            temp.delete()
+            return null
+        }
+        val fmt = DocumentEngine.detectFormat(temp, mime, dName)
+        val ext = when (fmt) {
+            DocumentEngine.DocumentFormat.PDF -> "pdf"
+            DocumentEngine.DocumentFormat.DOCX -> "docx"
+            DocumentEngine.DocumentFormat.DOC -> "doc"
+            DocumentEngine.DocumentFormat.TEXT -> if (rawExt.isNotBlank()) rawExt else "txt"
+            DocumentEngine.DocumentFormat.IMAGE -> if (rawExt.isNotBlank()) rawExt else "jpg"
+            DocumentEngine.DocumentFormat.UNKNOWN -> if (rawExt.isNotBlank()) rawExt else "bin"
+        }
         val f = File(dir(ctx, "originals"), "$id.$ext")
-        val input = ctx.contentResolver.openInputStream(uri) ?: return null
-        input.use { i -> f.outputStream().use { o -> i.copyTo(o) } }
-        return Triple(f.absolutePath, displayName(ctx, uri), mime)
+        // Encrypt at rest; readers decrypt via VaultCrypto (legacy plain files still read).
+        VaultCrypto.writeEncryptedBytes(f, temp.readBytes())
+        temp.delete()
+        return Triple(f.absolutePath, dName, mime)
     }
 
     fun saveCustomLogo(ctx: Context, id: String, uri: Uri): String? {
-        val bmp = ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) } ?: return null
+        val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+        require(bytes.size <= 10_000_000) { "logo too large" }
+        val bmp = decodeBounded(bytes) ?: return null
         val m = maxOf(bmp.width, bmp.height)
         val scaled = if (m > 256) Bitmap.createScaledBitmap(bmp, bmp.width * 256 / m, bmp.height * 256 / m, true) else bmp
         val f = File(dir(ctx, "logos"), "custom_$id.png")
-        f.outputStream().use { scaled.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        VaultCrypto.compressEncryptedBitmap(f, scaled, Bitmap.CompressFormat.PNG, 100)
         return f.absolutePath
     }
 
     fun saveCardSide(ctx: Context, id: String, side: String, bmp: Bitmap): String {
         val f = File(dir(ctx, "cards"), "${id}_$side.jpg")
-        f.outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 92, it) }
+        VaultCrypto.compressEncryptedBitmap(f, bmp, Bitmap.CompressFormat.JPEG, 92)
         return f.absolutePath
     }
 
     fun saveUserAvatar(ctx: Context, uri: Uri): String? {
-        val bmp = ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) } ?: return null
+        val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+        require(bytes.size <= 10_000_000) { "avatar too large" }
+        val bmp = decodeBounded(bytes) ?: return null
         val m = maxOf(bmp.width, bmp.height)
         val scaled = if (m > 512) Bitmap.createScaledBitmap(bmp, bmp.width * 512 / m, bmp.height * 512 / m, true) else bmp
         val f = File(dir(ctx, "avatars"), "user_avatar_${System.currentTimeMillis()}.png")
-        f.outputStream().use { scaled.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        VaultCrypto.compressEncryptedBitmap(f, scaled, Bitmap.CompressFormat.PNG, 100)
         return f.absolutePath
     }
 }
@@ -129,12 +175,25 @@ object Favicon {
     }
 
     private fun get(url: String, max: Int): ByteArray? {
-        val c = URL(url).openConnection() as HttpURLConnection
-        c.connectTimeout = 6000; c.readTimeout = 6000; c.instanceFollowRedirects = true
-        c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) Cardamom")
-        return try {
-            if (c.responseCode !in 200..299) null else c.inputStream.use { read(it, max) }
-        } finally { c.disconnect() }
+        var current = url
+        var hops = 0
+        while (hops <= 3) {
+            if (!current.startsWith("https://")) return null
+            val c = URL(current).openConnection() as HttpURLConnection
+            c.connectTimeout = 6000; c.readTimeout = 6000; c.instanceFollowRedirects = false
+            c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) Cardamom")
+            try {
+                val code = c.responseCode
+                if (code in listOf(301, 302, 303, 307, 308)) {
+                    val loc = c.getHeaderField("Location") ?: return null
+                    current = URL(URL(current), loc).toString()
+                    hops++
+                    continue
+                }
+                return if (code in 200..299) c.inputStream.use { read(it, max) } else null
+            } finally { c.disconnect() }
+        }
+        return null
     }
 
     fun fetch(ctx: Context, id: String, website: String): String? {
@@ -157,11 +216,11 @@ object Favicon {
                 val u = URL(base, c)
                 if (u.protocol != "https") continue
                 val bytes = get(u.toString(), 1_000_000) ?: continue
-                val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: continue
+                val bmp = Files.decodeBounded(bytes, maxPixels = 4_000_000L) ?: continue
                 val m = maxOf(bmp.width, bmp.height)
                 val scaled = if (m > 256) Bitmap.createScaledBitmap(bmp, bmp.width * 256 / m, bmp.height * 256 / m, true) else bmp
                 val f = File(Files.dir(ctx, "logos"), "$id.png")
-                f.outputStream().use { scaled.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                VaultCrypto.compressEncryptedBitmap(f, scaled, Bitmap.CompressFormat.PNG, 100)
                 return f.absolutePath
             } catch (e: Exception) { /* try next candidate */ }
         }

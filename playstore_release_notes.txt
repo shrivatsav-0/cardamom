@@ -1,7 +1,7 @@
-Cardamom v1.0.3: Export to PDF with details and flexible scanner
+Cardamom v1.0.4: Universal PDF and Word document scanner and viewer
 
-- Added multi-page PDF export for documents with details and watermark
-- Added front and back card sharing with dynamic attribute fields
-- Added horizontal and vertical orientation toggle to document scanner
-- Added option to share original front and back card photos directly
-- Optimized app performance with modular architecture and faster builds
+- Added support to import and view PDFs, DOCX, DOC, and text documents
+- Fixed black screen issue when choosing PDFs from Drive or phone storage
+- Added automatic multi-page splitting and high-resolution rendering
+- Added in-app inspection for multi-page documents and original files
+- Improved document export and sharing with high quality page rendering

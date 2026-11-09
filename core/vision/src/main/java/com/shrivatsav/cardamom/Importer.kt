@@ -109,9 +109,19 @@ object Importer {
     }
 
     suspend fun analyze(ctx: Context, uri: Uri): Detected {
-        val mime = ctx.contentResolver.getType(uri) ?: ""
         val id = UUID.randomUUID().toString()
-        val bitmaps = if (mime.contains("pdf")) renderPdf(ctx, uri) else listOfNotNull(decodeImage(ctx, uri))
+        val copy = Files.copyOriginal(ctx, id, uri)
+
+        val bitmaps = mutableListOf<Bitmap>()
+        if (copy != null) {
+            val f = File(copy.first)
+            if (f.exists()) {
+                bitmaps.addAll(DocumentEngine.renderFilePages(f))
+            }
+        }
+        if (bitmaps.isEmpty()) {
+            decodeImage(ctx, uri)?.let { bitmaps.add(it) }
+        }
 
         val codes = mutableListOf<Pair<String, CodeFormat>>()
         val scanner = BarcodeScanning.getClient()
@@ -142,11 +152,14 @@ object Importer {
             }
         }
 
-        val copy = Files.copyOriginal(ctx, id, uri)
         val firstCode = codes.firstOrNull()
         val primaryCode = firstCode?.first ?: ""
         val primaryFormat = firstCode?.second ?: CodeFormat.CODE128
         val detectedName = fields.firstOrNull { it.label.equals("Name", true) || it.label.equals("Student Name", true) }?.value ?: ""
+
+        val frontPath = bitmaps.firstOrNull()?.let { Files.saveCardSide(ctx, id, "front", it) }
+        val backPath = if (bitmaps.size > 1) Files.saveCardSide(ctx, id, "back", bitmaps[1]) else null
+
         val card = WalletCard(
             id = id,
             name = detectedName,
@@ -158,13 +171,16 @@ object Importer {
             fields = fields,
             points = points,
             status = status,
+            frontImagePath = frontPath,
+            backImagePath = backPath,
             originalPath = copy?.first,
             originalName = copy?.second,
             originalMime = copy?.third,
         )
 
-        val thumb = bitmaps.firstOrNull()
-        return Detected(card, details, codes, thumb, thumb, null)
+        val frontThumb = bitmaps.firstOrNull()
+        val backThumb = if (bitmaps.size > 1) bitmaps[1] else null
+        return Detected(card, details, codes, frontThumb, frontThumb, backThumb)
     }
 
     private fun extractCardData(
@@ -344,31 +360,11 @@ object Importer {
     private fun renderPdf(ctx: Context, uri: Uri): List<Bitmap> {
         val tempFile = File(ctx.cacheDir, "temp_import_${UUID.randomUUID()}.pdf")
         try {
-            ctx.contentResolver.openInputStream(uri)?.use { input ->
-                tempFile.outputStream().use { output -> input.copyTo(output) }
-            } ?: return emptyList()
+            val input = DocumentEngine.openUriStream(ctx, uri) ?: return emptyList()
+            input.use { i -> tempFile.outputStream().use { o -> i.copyTo(o) } }
             if (tempFile.length() == 0L) return emptyList()
-            val pfd = ParcelFileDescriptor.open(tempFile, ParcelFileDescriptor.MODE_READ_ONLY)
-            val out = mutableListOf<Bitmap>()
-            val renderer = PdfRenderer(pfd)
-            try {
-                for (i in 0 until minOf(renderer.pageCount, 3)) {
-                    val page = renderer.openPage(i)
-                    try {
-                        val w = 1400
-                        val h = (w.toFloat() * page.height / page.width).toInt()
-                        val b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-                        b.eraseColor(android.graphics.Color.WHITE)
-                        page.render(b, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                        out.add(b)
-                    } finally { page.close() }
-                }
-            } finally {
-                renderer.close()
-                pfd.close()
-            }
-            return out
-        } catch (e: Exception) {
+            return DocumentEngine.renderPdfPages(tempFile, maxPages = 5)
+        } catch (_: Exception) {
             return emptyList()
         } finally {
             tempFile.delete()

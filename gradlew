@@ -53,6 +53,12 @@ case "`uname`" in
   CYGWIN* )
     cygwin=true
     ;;
+  MSYS* )
+    # MSYS2/Git-Bash reports MSYS_NT* — needs the same cygpath conversion
+    # as Cygwin, otherwise Windows java gets a /c/... classpath it cannot read.
+    cygwin=true
+    msys=true
+    ;;
   Darwin* )
     darwin=true
     ;;

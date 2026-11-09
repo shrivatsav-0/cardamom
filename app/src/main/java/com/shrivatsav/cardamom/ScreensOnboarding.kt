@@ -105,7 +105,7 @@ fun WelcomeScreen(onNext: () -> Unit) {
         )
         Text("Every store card and code in one place, private on your phone.", color = C.Muted, fontSize = 17.sp, modifier = Modifier.padding(top = 14.dp))
         Box(Modifier.weight(1f).fillMaxWidth()) { CardFan() }
-        Dots(0, total = 6)
+        Dots(0, total = 7)
         Spacer(Modifier.height(20.dp))
         PrimaryButton("Next", onNext)
     }
@@ -142,7 +142,7 @@ fun ScanIntroScreen(onBack: () -> Unit, onNext: () -> Unit) {
         Bullet("Or pick a photo, or type the number")
         Bullet("Cards stay only on your phone")
         Spacer(Modifier.weight(1f))
-        Dots(1, total = 6)
+        Dots(1, total = 7)
         Spacer(Modifier.height(20.dp))
         PrimaryButton("Next", onNext)
     }
@@ -197,7 +197,7 @@ fun UsernameScreen(vm: AppViewModel, onBack: () -> Unit, onDone: () -> Unit) {
                         contentAlignment = Alignment.Center,
                     ) {
                         val avatarBmp = remember(avatarPath) {
-                            avatarPath?.let { BitmapFactory.decodeFile(it) }
+                            avatarPath?.let { VaultCrypto.decodeBitmapPath(it) }
                         }
                         Box(
                             modifier = Modifier
@@ -262,7 +262,7 @@ fun UsernameScreen(vm: AppViewModel, onBack: () -> Unit, onDone: () -> Unit) {
                     ToggleRow("Lock with fingerprint or PIN", "Recommended", lock) { lock = it }
                 }
                 Column(Modifier.padding(top = 28.dp)) {
-                    Dots(2, total = 6)
+                    Dots(2, total = 7)
                     Spacer(Modifier.height(20.dp))
                     PrimaryButton("Next", onClick = { submit() }, enabled = name.isNotBlank())
                 }
@@ -427,7 +427,7 @@ fun ModelDownloadScreen(vm: AppViewModel, onBack: () -> Unit, onNext: () -> Unit
         }
 
         Spacer(Modifier.height(24.dp))
-        Dots(3, total = 6)
+        Dots(3, total = 7)
         Spacer(Modifier.height(18.dp))
 
         PrimaryButton("Continue", onClick = onNext)
@@ -441,114 +441,103 @@ fun SetupCompleteScreen(
     onStart: () -> Unit,
     onAddFirstCard: () -> Unit,
 ) {
-    val ctx = LocalContext.current
-    val isAiReady = vm.isAiModelReady
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(C.Bg)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(horizontal = 24.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Spacer(Modifier.height(8.dp))
 
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val minH = maxHeight - 48.dp
-        Column(
-            Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 28.dp, vertical = 24.dp)
-        ) {
-            Column(
+            // Verified checkmark badge
+            Box(
                 Modifier
-                    .fillMaxWidth()
-                    .defaultMinSize(minHeight = minH),
-                verticalArrangement = Arrangement.SpaceBetween,
+                    .size(54.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(C.Yellow),
+                contentAlignment = Alignment.Center,
             ) {
-                Column {
-                    Spacer(Modifier.height(16.dp))
-                    Box(
-                        Modifier
-                            .size(72.dp)
-                            .clip(RoundedCornerShape(22.dp))
-                            .background(C.Yellow),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text("✓", color = C.Ink, fontSize = 36.sp, fontWeight = FontWeight.Bold)
-                    }
+                Text("✓", color = C.Ink, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+            }
 
-                    Spacer(Modifier.height(24.dp))
-                    Text("You're all set!", fontSize = 42.sp, lineHeight = 46.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(18.dp))
+            Text("You're all set!", fontSize = 34.sp, lineHeight = 38.sp, fontWeight = FontWeight.Bold, color = C.Cream)
+            Text(
+                "Your private cardamom wallet is configured and ready to use.",
+                color = C.Muted,
+                fontSize = 15.sp,
+                lineHeight = 21.sp,
+                modifier = Modifier.padding(top = 6.dp, bottom = 18.dp),
+            )
+
+            // Setup Summary Card
+            Group {
+                Row2("Wallet Owner") {
                     Text(
-                        "Your private cardamom wallet is configured and ready to use.",
-                        color = C.Muted,
-                        fontSize = 17.sp,
-                        lineHeight = 23.sp,
-                        modifier = Modifier.padding(top = 10.dp, bottom = 28.dp),
+                        vm.pendingUserName.ifBlank { vm.userName.ifBlank { "You" } },
+                        color = C.Cream,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 14.sp,
                     )
-
-                    // Setup Summary Card
-                    Group {
-                        Row2("Wallet Owner") {
-                            Text(
-                                vm.pendingUserName.ifBlank { vm.userName.ifBlank { "You" } },
-                                color = C.Cream,
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 15.sp,
-                            )
-                        }
-                        Sep()
-                        Row2("App Lock") {
-                            Text(
-                                if (vm.pendingLock) "Fingerprint / PIN Protected" else "Unlocked",
-                                color = if (vm.pendingLock) C.Mint else C.Muted,
-                                fontSize = 14.sp,
-                            )
-                        }
-                        Sep()
-                        Row2("OCR Engine") {
-                            Text(
-                                text = "Google ML Kit (Default)",
-                                color = C.Mint,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Medium,
-                            )
-                        }
-                    }
-
-                    Spacer(Modifier.height(18.dp))
-
-                    // Tips Banner
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(C.Surface)
-                            .padding(16.dp)
-                    ) {
-                        Column {
-                            Text("What to do next", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                if (isAiReady)
-                                    "Point your camera at any store card, loyalty pass, ID, or ticket. Cardamom will auto-fill your numbers and attributes."
-                                else
-                                    "Add cards by scanning barcodes or typing numbers. You can download the on-device AI model anytime in Settings for automatic field recognition.",
-                                color = C.Muted,
-                                fontSize = 13.sp,
-                                lineHeight = 19.sp,
-                            )
-                        }
-                    }
                 }
-
-                Column(Modifier.padding(top = 28.dp)) {
-                    Dots(5, total = 6)
-                    Spacer(Modifier.height(20.dp))
-                    PrimaryButton("Start adding cards", onClick = {
-                        vm.finishOnboarding()
-                        onAddFirstCard()
-                    })
-                    Spacer(Modifier.height(10.dp))
-                    SecondaryButton("Go to wallet", onClick = {
-                        vm.finishOnboarding()
-                        onStart()
-                    })
+                Sep()
+                Row2("Membership") {
+                    Text(
+                        text = DistributionBridge.membershipLabel(vm),
+                        color = C.Mint,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+                Sep()
+                Row2("App Lock") {
+                    Text(
+                        if (vm.pendingLock) "Fingerprint / PIN Protected" else "Unlocked",
+                        color = if (vm.pendingLock) C.Mint else C.Muted,
+                        fontSize = 14.sp,
+                    )
                 }
             }
+
+            Spacer(Modifier.height(14.dp))
+
+            // Tip Banner
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(C.Surface)
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+            ) {
+                Text(
+                    "Tip: Point your camera at any store card, ID, or loyalty barcode to scan and save it.",
+                    color = C.Muted,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                )
+            }
+        }
+
+        // Action Buttons & Dots (Positioned above system navigation bar)
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Dots(active = if (DistributionBridge.hasOnboardingPaywall) 6 else 5, total = DistributionBridge.onboardingTotalSteps)
+            Spacer(Modifier.height(16.dp))
+            PrimaryButton("Start adding cards", onClick = {
+                vm.finishOnboarding()
+                onAddFirstCard()
+            })
+            Spacer(Modifier.height(10.dp))
+            SecondaryButton("Go to wallet", onClick = {
+                vm.finishOnboarding()
+                onStart()
+            })
         }
     }
 }
@@ -566,11 +555,39 @@ fun DeveloperSupportScreen(
 fun UnlockScreen(vm: AppViewModel) {
     val ctx = LocalContext.current
     val act = ctx.findActivity() as? FragmentActivity
+    val authenticatorAvailable = Auth.available(ctx)
+    var showNoAuthenticator by remember { mutableStateOf(!authenticatorAvailable) }
     fun go(credentialOnly: Boolean) {
-        if (!Auth.available(ctx)) { vm.locked = false; return }
-        act?.let { Auth.prompt(it, credentialOnly) { vm.locked = false } }
+        if (!Auth.available(ctx)) { showNoAuthenticator = true; return }
+        if (act == null) { showNoAuthenticator = true; return }
+        Auth.prompt(act, credentialOnly) { vm.locked = false }
     }
-    LaunchedEffect(Unit) { go(false) }
+    LaunchedEffect(Unit) { if (authenticatorAvailable) go(false) }
+
+    if (showNoAuthenticator) {
+        // Fail-closed UI: do NOT silently unlock. The user must explicitly
+        // choose to continue without a lock (e.g. no PIN/biometric enrolled),
+        // which is a conscious downgrade, not an automatic bypass.
+        Column(Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 24.dp)) {
+            Column(Modifier.weight(1f).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                AppIcon(80.dp)
+                Text(
+                    text = "No screen lock set up",
+                    fontSize = 28.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 24.dp),
+                )
+                Text(
+                    "Cardamom lock is on, but this device has no PIN, password or biometrics enrolled. Set one up in Android Settings, or continue without the app lock.",
+                    color = C.Muted, fontSize = 16.sp, textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 10.dp),
+                )
+            }
+            PrimaryButton("Continue without app lock", { vm.locked = false })
+            Spacer(Modifier.height(10.dp))
+            SecondaryButton("Try again", { go(false) })
+        }
+        return
+    }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 24.dp)) {
         Column(Modifier.weight(1f).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {

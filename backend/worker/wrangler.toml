@@ -1,0 +1,13 @@
+name = "cardamom-licensing-api"
+main = "worker.js"
+compatibility_date = "2024-09-01"
+
+# Cloudflare KV Namespace binding to persist anonymous hashed device trial timestamps
+# Run `npx wrangler kv:namespace create CARDAMOM_KV` and paste the generated id here.
+[[kv_namespaces]]
+binding = "CARDAMOM_KV"
+id = "YOUR_KV_NAMESPACE_ID"
+preview_id = "YOUR_KV_PREVIEW_NAMESPACE_ID"
+
+[observability]
+enabled = true

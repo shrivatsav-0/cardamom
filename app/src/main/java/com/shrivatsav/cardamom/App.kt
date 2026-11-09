@@ -83,13 +83,22 @@ class MainActivity : FragmentActivity() {
 @Composable
 fun AppRoot(vm: AppViewModel) {
     val nav = rememberNavController()
-    val start = remember { if (!vm.onboarded) "w1" else "wallet" }
+    val start = remember {
+        if (!vm.onboarded) "w1"
+        else if (DistributionBridge.hasOnboardingPaywall && vm.licenseState is LicenseState.NotStarted) "trial_intro"
+        else "wallet"
+    }
     val idArg = listOf(navArgument("id") { type = NavType.StringType })
     val ctx = androidx.compose.ui.platform.LocalContext.current
 
-    LaunchedEffect(vm.locked) {
+    LaunchedEffect(vm.locked, vm.isPaywallLocked) {
+        val act = ctx.findActivity()
+        if (vm.isPaywallLocked) {
+            act?.intent?.removeExtra("open_card_id")
+            act?.intent?.removeExtra("shortcut")
+            return@LaunchedEffect
+        }
         if (!vm.locked && vm.onboarded) {
-            val act = ctx.findActivity()
             val cardId = act?.intent?.getStringExtra("open_card_id")
             if (!cardId.isNullOrBlank()) {
                 act.intent.removeExtra("open_card_id")
@@ -102,7 +111,9 @@ fun AppRoot(vm: AppViewModel) {
         }
     }
     Box(Modifier.fillMaxSize()) {
-        if (vm.locked) {
+        if (vm.isPaywallLocked) {
+            DistributionBridge.PaywallLockScreen(vm)
+        } else if (vm.locked) {
             UnlockScreen(vm)
         } else {
             NavHost(nav, startDestination = start, modifier = Modifier.fillMaxSize()) {
@@ -115,17 +126,37 @@ fun AppRoot(vm: AppViewModel) {
                 }
                 composable("w4") {
                     ModelDownloadScreen(vm, onBack = { nav.popBackStack() }, onNext = {
-                        nav.navigate("w5")
+                        nav.navigate(if (DistributionBridge.hasOnboardingPaywall) "w5" else "w6")
                     })
                 }
-                composable("w5") {
+                // Screen N-2: Premium / Trial Screen (Play Store distribution only)
+                if (DistributionBridge.hasOnboardingPaywall) {
+                    composable("w5") {
+                        DistributionBridge.OnboardingPaywallScreen(
+                            vm = vm,
+                            onBack = { nav.popBackStack() },
+                            onNext = { nav.navigate("w6") },
+                        )
+                    }
+                }
+                // Screen N-1: Networking Screen
+                composable("w6") {
                     DeveloperSupportScreen(
                         vm = vm,
-                        onBack = { nav.popBackStack() },
-                        onNext = { nav.navigate("w6") },
+                        onBack = {
+                            if (DistributionBridge.hasOnboardingPaywall) {
+                                nav.popBackStack()
+                            } else {
+                                nav.navigate("w4") {
+                                    popUpTo("w4") { inclusive = false }
+                                }
+                            }
+                        },
+                        onNext = { nav.navigate("w7") },
                     )
                 }
-                composable("w6") {
+                // Screen N: Setup Complete Screen
+                composable("w7") {
                     SetupCompleteScreen(
                         vm = vm,
                         onStart = {
@@ -134,12 +165,24 @@ fun AppRoot(vm: AppViewModel) {
                             }
                         },
                         onAddFirstCard = {
-                            nav.navigate("wallet") {
+                            nav.navigate("scan") {
                                 popUpTo(0) { inclusive = true }
                             }
-                            nav.navigate("scan")
                         },
                     )
+                }
+                if (DistributionBridge.hasOnboardingPaywall) {
+                    composable("trial_intro") {
+                        DistributionBridge.TrialIntroRouteScreen(
+                            vm = vm,
+                            onBack = { nav.popBackStack() },
+                            onContinue = {
+                                nav.navigate("wallet") {
+                                    popUpTo(0) { inclusive = true }
+                                }
+                            },
+                        )
+                    }
                 }
                 composable("wallet") {
                     WalletScreen(
@@ -268,6 +311,22 @@ fun AppRoot(vm: AppViewModel) {
             DonationModal(
                 onDismiss = { vm.showDonationModal = false },
                 vm = vm,
+            )
+        }
+        if (vm.showTrialEndingSheet && !vm.isPaywallLocked && !vm.locked) {
+            DistributionBridge.TrialEndingSheet(vm)
+        }
+        if (vm.showPurchaseSuccess) {
+            DistributionBridge.PurchaseSuccessModal(
+                vm = vm,
+                onDone = {
+                    vm.dismissPurchaseSuccess()
+                    if (vm.onboarded) {
+                        nav.navigate("wallet") {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    }
+                },
             )
         }
     }

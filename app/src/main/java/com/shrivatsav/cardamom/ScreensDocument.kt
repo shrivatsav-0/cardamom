@@ -78,60 +78,16 @@ fun DocumentIcon(modifier: Modifier = Modifier, tint: Color = C.Yellow) {
 }
 
 fun getDocumentImages(ctx: Context, doc: WalletDocument): List<Bitmap> {
-    val fromPagePaths = doc.pagePaths.mapNotNull { path ->
-        val f = File(path)
-        if (f.exists() && f.length() > 0) BitmapFactory.decodeFile(f.absolutePath) else null
-    }
-    if (fromPagePaths.isNotEmpty()) return fromPagePaths
-
-    val uriFile = File(doc.uriPath)
-    if (uriFile.exists() && uriFile.length() > 0 && !doc.uriPath.endsWith(".pdf", ignoreCase = true)) {
-        val bmp = BitmapFactory.decodeFile(uriFile.absolutePath)
-        if (bmp != null) return listOf(bmp)
-    }
-
-    val docDir = Files.dir(ctx, "documents")
-    val jpegs: Array<File> = docDir.listFiles { f: File ->
-        f.name.startsWith("doc_${doc.id}") &&
-        (f.name.endsWith(".jpg", ignoreCase = true) || f.name.endsWith(".png", ignoreCase = true)) &&
-        f.length() > 0
-    } ?: emptyArray<File>()
-
-    val fromDisk = jpegs.sortedBy { it.name }.mapNotNull { f: File -> BitmapFactory.decodeFile(f.absolutePath) }
-    if (fromDisk.isNotEmpty()) return fromDisk
-
-    return emptyList()
+    return DocumentEngine.renderDocumentPages(ctx, doc)
 }
 
 fun getDocumentPdfPages(doc: WalletDocument): List<Bitmap> {
     val pdfFile = listOfNotNull(doc.pdfPath, doc.uriPath)
         .map { File(it) }
-        .firstOrNull { it.exists() && it.length() > 100 && it.name.endsWith(".pdf", ignoreCase = true) }
+        .firstOrNull { it.exists() && it.length() > 50 }
         ?: return emptyList()
 
-    return try {
-        val pfd = ParcelFileDescriptor.open(pdfFile, ParcelFileDescriptor.MODE_READ_ONLY)
-        val renderer = PdfRenderer(pfd)
-        val count = minOf(renderer.pageCount, 20)
-        val pages = (0 until count).map { i ->
-            val page = renderer.openPage(i)
-            val scale = minOf(1200f / page.width.coerceAtLeast(1), 2f).coerceAtLeast(1f)
-            val w = (page.width * scale).toInt()
-            val h = (page.height * scale).toInt()
-            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-            bmp.eraseColor(android.graphics.Color.WHITE)
-            val canvas = android.graphics.Canvas(bmp)
-            canvas.drawColor(android.graphics.Color.WHITE)
-            page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-            page.close()
-            bmp
-        }
-        renderer.close()
-        pfd.close()
-        pages
-    } catch (e: Exception) {
-        emptyList()
-    }
+    return DocumentEngine.renderPdfPages(pdfFile)
 }
 
 // ---------------- Document Tile for Home Screen ----------------
@@ -201,12 +157,22 @@ fun DocumentTile(
                 // Full width document container taking as much space as image takes (landscape or vertical)
                 if (allDocPages.isNotEmpty()) {
                     val tilePagerState = rememberPagerState { allDocPages.size }
+                    // Size the container to the page bitmap aspect ratio (like the
+                    // detail/full viewers) instead of a fixed height. A fixed-height
+                    // box + ContentScale.Fit letterboxes pages with white bars.
+                    val firstTileBmp = allDocPages.firstOrNull()
+                    val tileAspect = if (firstTileBmp != null && firstTileBmp.height > 0) {
+                        (firstTileBmp.width.toFloat() / firstTileBmp.height.toFloat()).coerceIn(0.5f, 2.0f)
+                    } else null
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(min = 200.dp, max = 340.dp)
+                            .then(
+                                if (tileAspect != null) Modifier.aspectRatio(tileAspect)
+                                else Modifier.heightIn(min = 200.dp, max = 340.dp)
+                            )
                             .clip(RoundedCornerShape(16.dp))
-                            .background(Color(0xFF141414))
+                            .background(Color.White)
                             .clickable(onClick = onViewDetails),
                         contentAlignment = Alignment.Center,
                     ) {
@@ -221,7 +187,7 @@ fun DocumentTile(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .clip(RoundedCornerShape(16.dp)),
-                                contentScale = ContentScale.Crop,
+                                contentScale = ContentScale.Fit,
                                 filterQuality = FilterQuality.High,
                             )
                         }
@@ -316,65 +282,10 @@ fun DocumentScanScreen(
     val act = ctx.findActivity()
 
 
-    // PDF file picker
-    val pdfPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    // Document and PDF file picker
+    val docPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            scope.launch {
-                vm.busyText = "Importing PDF document"
-                try {
-                    val id = UUID.randomUUID().toString()
-                    val fileName = Files.displayName(ctx, uri).substringBeforeLast('.')
-                    val docDir = Files.dir(ctx, "documents")
-                    val dest = File(docDir, "doc_$id.pdf")
-                    var pageCount = 1
-                    val pagePaths = mutableListOf<String>()
-                    withContext(Dispatchers.IO) {
-                        ctx.contentResolver.openInputStream(uri)?.use { input ->
-                            dest.outputStream().use { output -> input.copyTo(output) }
-                        }
-                        if (dest.exists() && dest.length() > 0) {
-                            try {
-                                val pfd = ParcelFileDescriptor.open(dest, ParcelFileDescriptor.MODE_READ_ONLY)
-                                val renderer = PdfRenderer(pfd)
-                                pageCount = renderer.pageCount
-                                val renderLimit = minOf(renderer.pageCount, 10)
-                                for (i in 0 until renderLimit) {
-                                    val page = renderer.openPage(i)
-                                    val scale = minOf(1200f / page.width.coerceAtLeast(1), 2f).coerceAtLeast(1f)
-                                    val bmp = Bitmap.createBitmap((page.width * scale).toInt(), (page.height * scale).toInt(), Bitmap.Config.ARGB_8888)
-                                    bmp.eraseColor(android.graphics.Color.WHITE)
-                                    val canvas = android.graphics.Canvas(bmp)
-                                    canvas.drawColor(android.graphics.Color.WHITE)
-                                    page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                                    page.close()
-                                    val pageFile = File(docDir, "doc_${id}_page_$i.jpg")
-                                    pageFile.outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 90, it) }
-                                    pagePaths.add(pageFile.absolutePath)
-                                }
-                                renderer.close()
-                                pfd.close()
-                            } catch (_: Exception) {}
-                        }
-                    }
-                    val doc = WalletDocument(
-                        id = id,
-                        title = "",
-                        docType = "Document",
-                        uriPath = dest.absolutePath,
-                        mimeType = "application/pdf",
-                        pageCount = pageCount.coerceAtLeast(1),
-                        pagePaths = pagePaths,
-                        pdfPath = dest.absolutePath,
-                        fileSize = dest.length(),
-                    )
-                    vm.draftDoc = doc
-                    onScanned()
-                } catch (e: Exception) {
-                    Toast.makeText(ctx, "Couldn't read PDF: ${e.message}", Toast.LENGTH_SHORT).show()
-                } finally {
-                    vm.busyText = null
-                }
-            }
+            vm.importDocumentFromUri(uri, onDone = onScanned)
         }
     }
 
@@ -400,7 +311,7 @@ fun DocumentScanScreen(
             color = C.Cream,
         )
         Text(
-            text = "Edges, perspective and shadows are fixed automatically.",
+            text = "Tip: on the camera screen, rotate your phone or the document to match the frame, and use the orientation button for horizontal documents.",
             color = C.Muted,
             fontSize = 15.sp,
             modifier = Modifier.padding(top = 6.dp, bottom = 24.dp),
@@ -444,7 +355,7 @@ fun DocumentScanScreen(
 
         Spacer(Modifier.height(14.dp))
 
-        // 2. Import a PDF (Orange)
+        // 2. Import a Document or PDF (Orange)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -452,7 +363,13 @@ fun DocumentScanScreen(
                 .background(Color(0xFFF6B04B))
                 .clickable {
                     vm.external()
-                    pdfPicker.launch(arrayOf("application/pdf"))
+                    docPicker.launch(arrayOf(
+                        "application/pdf",
+                        "application/msword",
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        "text/plain",
+                        "*/*"
+                    ))
                 }
                 .padding(20.dp),
         ) {
@@ -466,14 +383,14 @@ fun DocumentScanScreen(
                 Spacer(Modifier.width(16.dp))
                 Column {
                     Text(
-                        text = "Import a PDF",
+                        text = "Import document or PDF",
                         color = Color(0xFF161616),
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Bold,
                     )
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        text = "Pick a file from your phone",
+                        text = "Pick PDF, DOC, DOCX, or text from phone or Drive",
                         color = Color(0xFF161616).copy(alpha = 0.75f),
                         fontSize = 13.sp,
                     )
@@ -535,7 +452,7 @@ fun DocumentUploadScreen(
         LaunchedEffect(Unit) { onBack() }
         return
     }
-
+    val ctx = LocalContext.current
     var title by remember { mutableStateOf(draft.title) }
     var docType by remember { mutableStateOf(draft.docType.ifBlank { "Document" }) }
     var issuer by remember { mutableStateOf(draft.issuer) }
@@ -567,31 +484,6 @@ fun DocumentUploadScreen(
 
     val pageCount = draft.pagePaths.size.coerceAtLeast(1)
     val safePageIndex = selectedPageIndex.coerceIn(0, pageCount - 1)
-    val currentPath = draft.pagePaths.getOrNull(safePageIndex) ?: draft.uriPath
-
-    val previewBmp = remember(currentPath) {
-        if (currentPath.endsWith(".pdf", ignoreCase = true)) {
-            try {
-                val f = File(currentPath)
-                val pfd = ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)
-                val renderer = PdfRenderer(pfd)
-                val page = renderer.openPage(0)
-                val scale = minOf(600f / page.width.coerceAtLeast(1), 2f).coerceAtLeast(1f)
-                val bmp = Bitmap.createBitmap((page.width * scale).toInt(), (page.height * scale).toInt(), Bitmap.Config.ARGB_8888)
-                bmp.eraseColor(android.graphics.Color.WHITE)
-                val canvas = android.graphics.Canvas(bmp)
-                canvas.drawColor(android.graphics.Color.WHITE)
-                page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                page.close()
-                renderer.close()
-                pfd.close()
-                bmp
-            } catch (e: Exception) { null }
-        } else {
-            val f = File(currentPath)
-            if (f.exists()) BitmapFactory.decodeFile(f.absolutePath) else null
-        }
-    }
 
     Column(
         Modifier
@@ -616,10 +508,30 @@ fun DocumentUploadScreen(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            // Match the preview box to the first page aspect ratio (bounds-only
+            // decode) so scanned pages fill the frame edge-to-edge instead of
+            // showing white letterbox borders. Falls back to 290dp.
+            val firstPageAspect = remember(draft.pagePaths.firstOrNull()) {
+                val path = draft.pagePaths.firstOrNull()
+                if (path != null && File(path).exists()) {
+                    // Bounds decode must run on decrypted bytes (vault files are encrypted)
+                    val bytes = try { VaultCrypto.readDecryptedBytes(File(path)) } catch (_: Exception) { null }
+                    if (bytes != null) {
+                        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+                        if (opts.outWidth > 0 && opts.outHeight > 0) {
+                            (opts.outWidth.toFloat() / opts.outHeight.toFloat()).coerceIn(0.5f, 2.0f)
+                        } else null
+                    } else null
+                } else null
+            }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(290.dp)
+                    .then(
+                        if (firstPageAspect != null) Modifier.aspectRatio(firstPageAspect)
+                        else Modifier.height(290.dp)
+                    )
                     .clip(RoundedCornerShape(20.dp))
                     .background(Color(0xFF141414))
                     .border(1.dp, C.Outline.copy(alpha = 0.5f), RoundedCornerShape(20.dp)),
@@ -629,50 +541,42 @@ fun DocumentUploadScreen(
                     state = uploadPagerState,
                     modifier = Modifier.fillMaxSize(),
                 ) { page ->
-                    val path = draft.pagePaths.getOrNull(page) ?: ""
-                    val pageBmp = remember(path) {
-                        if (path.endsWith(".pdf", ignoreCase = true)) {
-                            try {
-                                val f = File(path)
-                                val pfd = ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)
-                                val renderer = PdfRenderer(pfd)
-                                val p = renderer.openPage(0)
-                                val scale = minOf(600f / p.width.coerceAtLeast(1), 2f).coerceAtLeast(1f)
-                                val bmp = Bitmap.createBitmap((p.width * scale).toInt(), (p.height * scale).toInt(), Bitmap.Config.ARGB_8888)
-                                bmp.eraseColor(android.graphics.Color.WHITE)
-                                val canvas = android.graphics.Canvas(bmp)
-                                canvas.drawColor(android.graphics.Color.WHITE)
-                                p.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                                p.close()
-                                renderer.close()
-                                pfd.close()
-                                bmp
-                            } catch (e: Exception) { null }
+                    val pageBmp = remember(page, draft) {
+                        val path = draft.pagePaths.getOrNull(page)
+                        if (path != null && File(path).exists()) {
+                            VaultCrypto.decodeBitmapPath(path)
                         } else {
-                            val f = File(path)
-                            if (f.exists()) BitmapFactory.decodeFile(f.absolutePath) else null
+                            DocumentEngine.renderSinglePage(ctx, draft, page)
                         }
                     }
 
-                    if (pageBmp != null) {
-                        Image(
-                            bitmap = pageBmp.asImageBitmap(),
-                            contentDescription = "Document preview page ${page + 1}",
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .clip(RoundedCornerShape(20.dp)),
-                            contentScale = ContentScale.Crop,
-                            filterQuality = FilterQuality.High,
-                        )
-                    } else {
-                        Column(
-                            modifier = Modifier.fillMaxSize().padding(14.dp),
-                            verticalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            Box(Modifier.width(70.dp).height(12.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFF8B7CF6)))
-                            Box(Modifier.fillMaxWidth(0.9f).height(5.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFFD0C8B8)))
-                            Box(Modifier.fillMaxWidth(0.95f).height(5.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFFD0C8B8)))
-                            Box(Modifier.fillMaxWidth(0.8f).height(5.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFFD0C8B8)))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color.White),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (pageBmp != null) {
+                            Image(
+                                bitmap = pageBmp.asImageBitmap(),
+                                contentDescription = "Document preview page ${page + 1}",
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(RoundedCornerShape(16.dp)),
+                                contentScale = ContentScale.Fit,
+                                filterQuality = FilterQuality.High,
+                            )
+                        } else {
+                            Column(
+                                modifier = Modifier.fillMaxSize().padding(14.dp),
+                                verticalArrangement = Arrangement.Center,
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                DocumentIcon(modifier = Modifier.size(36.dp), tint = C.Yellow)
+                                Spacer(Modifier.height(8.dp))
+                                Text("Page ${page + 1}", color = Color.Gray, fontSize = 13.sp)
+                            }
                         }
                     }
                 }
@@ -915,11 +819,7 @@ fun DocumentDetailScreen(
         return
     }
 
-    val images = remember(displayDoc) { getDocumentImages(ctx, displayDoc) }
-    val pdfPages = remember(displayDoc, images) {
-        if (images.isNotEmpty()) emptyList() else getDocumentPdfPages(displayDoc)
-    }
-    val allPages = if (images.isNotEmpty()) images else pdfPages
+    val allPages = remember(displayDoc) { getDocumentImages(ctx, displayDoc) }
 
     Column(
         Modifier

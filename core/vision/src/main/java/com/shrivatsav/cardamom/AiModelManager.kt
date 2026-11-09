@@ -108,7 +108,25 @@ object AiModelManager {
         val dir = getModelDir(context)
         val manifest = File(dir, "model.manifest.json")
         val weights = File(dir, "vision_weights.bin")
-        return dir.exists() && manifest.exists() && weights.exists() && weights.length() > 0
+        if (!(dir.exists() && manifest.exists() && weights.exists() && weights.length() > 0)) return false
+        // Integrity: if the manifest records a hash, the file must match it.
+        return try {
+            val expected = JSONObject(manifest.readText(Charsets.UTF_8)).optString("weights_sha256", "")
+            expected.isBlank() || expected.equals(sha256Hex(weights), ignoreCase = true)
+        } catch (_: Exception) { false }
+    }
+
+    private fun sha256Hex(file: File): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        file.inputStream().buffered().use { input ->
+            val buf = ByteArray(32 * 1024)
+            while (true) {
+                val n = input.read(buf)
+                if (n < 0) break
+                digest.update(buf, 0, n)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     fun initStatus(context: Context) {
@@ -155,107 +173,85 @@ object AiModelManager {
                     var lastBytes = 0L
                     var speed = 0L
 
-                    // Attempt real HTTP download if reachable; fallback to fast local model synthesis
-                    var networkSuccess = false
+                    // Real download only. Fail closed on any error — never
+                    // synthesize dummy weights and mark them Ready.
+                    // NOTE: catalog.downloadUrl is a .tar archive while the
+                    // target is named vision_weights.bin; the URL/model
+                    // packaging must be fixed upstream and a pinned
+                    // SHA-256 for the artifact added to ModelCatalogInfo
+                    // before this can be trusted beyond TLS.
+                    val tmpFile = File(dir, "vision_weights.bin.tmp")
+                    tmpFile.delete()
                     try {
                         var curUrl = catalog.downloadUrl
+                        require(curUrl.startsWith("https://")) { "model URL must be https" }
                         var conn: HttpURLConnection? = null
                         var redirectHops = 0
-                        while (redirectHops < 6) {
+                        var code = 0
+                        while (redirectHops <= 5) {
+                            require(curUrl.startsWith("https://")) { "redirect to non-https blocked" }
                             conn = (URL(curUrl).openConnection() as HttpURLConnection).apply {
                                 connectTimeout = 8000
                                 readTimeout = 12000
-                                instanceFollowRedirects = true
+                                instanceFollowRedirects = false
                                 requestMethod = "GET"
                                 setRequestProperty("User-Agent", "Cardamom-Android")
                             }
-                            val code = conn.responseCode
+                            code = conn.responseCode
                             if (code in listOf(HttpURLConnection.HTTP_MOVED_PERM, HttpURLConnection.HTTP_MOVED_TEMP, HttpURLConnection.HTTP_SEE_OTHER, 307, 308)) {
                                 val newLoc = conn.getHeaderField("Location")
                                 conn.disconnect()
-                                if (!newLoc.isNullOrBlank()) {
-                                    curUrl = newLoc
-                                    redirectHops++
-                                    continue
-                                }
+                                require(!newLoc.isNullOrBlank()) { "redirect without Location" }
+                                curUrl = URL(URL(curUrl), newLoc).toString()
+                                redirectHops++
+                                continue
                             }
                             break
                         }
-
-                        if (conn != null && conn.responseCode in 200..299) {
-                            val stream = conn.inputStream
-                            val fos = FileOutputStream(targetFile)
-                            val buffer = ByteArray(32 * 1024)
-                            var read: Int
-                            val cl = conn.contentLengthLong
-                            val actualTotal = if (cl > 0) cl else totalBytes
-                            while (stream.read(buffer).also { read = it } != -1) {
-                                ensureActive()
-                                fos.write(buffer, 0, read)
-                                downloaded += read
-                                val now = System.currentTimeMillis()
-                                if (now - lastTime >= 250) {
-                                    val elapsed = (now - lastTime).coerceAtLeast(1)
-                                    speed = ((downloaded - lastBytes) * 1000) / elapsed
-                                    lastBytes = downloaded
-                                    lastTime = now
-                                    _status.value = AiModelStatus.Downloading(
-                                        progress = (downloaded.toFloat() / actualTotal.toFloat()).coerceIn(0f, 1f),
-                                        downloadedBytes = downloaded,
-                                        totalBytes = actualTotal,
-                                        speedBps = speed,
-                                    )
+                        require(code in 200..299) { "model download failed: HTTP $code" }
+                        conn!!.inputStream.buffered().use { stream ->
+                            FileOutputStream(tmpFile).buffered().use { fos ->
+                                val buffer = ByteArray(32 * 1024)
+                                var read: Int
+                                val cl = conn.contentLengthLong
+                                val actualTotal = if (cl > 0) cl else totalBytes
+                                require(actualTotal <= 200_000_000L) { "model too large" }
+                                while (stream.read(buffer).also { read = it } != -1) {
+                                    ensureActive()
+                                    downloaded += read
+                                    require(downloaded <= 200_000_000L) { "model download exceeds size cap" }
+                                    fos.write(buffer, 0, read)
+                                    val now = System.currentTimeMillis()
+                                    if (now - lastTime >= 250) {
+                                        val elapsed = (now - lastTime).coerceAtLeast(1)
+                                        speed = ((downloaded - lastBytes) * 1000) / elapsed
+                                        lastBytes = downloaded
+                                        lastTime = now
+                                        _status.value = AiModelStatus.Downloading(
+                                            progress = (downloaded.toFloat() / actualTotal.toFloat()).coerceIn(0f, 1f),
+                                            downloadedBytes = downloaded,
+                                            totalBytes = actualTotal,
+                                            speedBps = speed,
+                                        )
+                                    }
                                 }
                             }
-                            fos.flush()
-                            fos.close()
-                            stream.close()
-                            networkSuccess = true
                         }
-                        conn?.disconnect()
+                        conn.disconnect()
+                        require(tmpFile.exists() && tmpFile.length() > 0) { "empty model download" }
+                        if (tmpFile.length() != catalog.sizeBytes && catalog.sizeBytes > 0) {
+                            // Size mismatch is a warning only when the server
+                            // reports a different length; hash is recorded below.
+                        }
+                        tmpFile.renameTo(targetFile)
                     } catch (e: Exception) {
-                        networkSuccess = false
-                    }
-
-                    if (!networkSuccess) {
-                        // Resilient on-device bundle provisioning with realistic progress updates
-                        val stepCount = 20
-                        val chunkSize = totalBytes / stepCount
-                        val fos = FileOutputStream(targetFile)
-                        val dummyChunk = ByteArray(4096) { (it % 256).toByte() }
-
-                        for (step in 1..stepCount) {
-                            ensureActive()
-                            val stepTarget = if (step == stepCount) totalBytes else (step * chunkSize)
-                            while (downloaded < stepTarget) {
-                                val toWrite = minOf(dummyChunk.size.toLong(), stepTarget - downloaded).toInt()
-                                fos.write(dummyChunk, 0, toWrite)
-                                downloaded += toWrite
-                            }
-                            val now = System.currentTimeMillis()
-                            val elapsed = (now - lastTime).coerceAtLeast(1)
-                            speed = ((downloaded - lastBytes) * 1000) / elapsed
-                            lastBytes = downloaded
-                            lastTime = now
-
-                            _status.value = AiModelStatus.Downloading(
-                                progress = (downloaded.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f),
-                                downloadedBytes = downloaded,
-                                totalBytes = totalBytes,
-                                speedBps = speed.coerceAtLeast(1_500_000L),
-                            )
-                            if (simulatedDelay) {
-                                delay(60L)
-                            } else {
-                                delay(35L)
-                            }
-                        }
-                        fos.flush()
-                        fos.close()
+                        tmpFile.delete()
+                        targetFile.delete()
+                        throw e
                     }
 
                     _status.value = AiModelStatus.Verifying
-                    delay(120L)
+                    val weightsSha256 = sha256Hex(targetFile)
 
                     // Write manifest and support artifacts
                     val manifestJson = JSONObject().apply {
@@ -264,6 +260,7 @@ object AiModelManager {
                         put("architecture", catalog.architecture)
                         put("license", catalog.license)
                         put("weights_size", targetFile.length())
+                        put("weights_sha256", weightsSha256)
                         put("installed_at", System.currentTimeMillis())
                     }
                     manifestFile.writeText(manifestJson.toString(2), Charsets.UTF_8)

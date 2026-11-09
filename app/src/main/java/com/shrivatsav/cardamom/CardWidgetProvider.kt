@@ -35,9 +35,15 @@ class CardWidgetProvider : AppWidgetProvider() {
 
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
+        // NOTE: AppWidgetProvider must be exported=true to receive
+        // APPWIDGET_UPDATE from the system. For our custom NEXT_CARD action,
+        // validate that the target is actually one of *our* live widget ids
+        // so arbitrary apps cannot drive arbitrary widget updates.
         if (intent.action == ACTION_NEXT_CARD) {
             val appWidgetId = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
-            if (appWidgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
+            val manager = AppWidgetManager.getInstance(context)
+            val liveIds = manager.getAppWidgetIds(ComponentName(context, CardWidgetProvider::class.java))
+            if (appWidgetId != AppWidgetManager.INVALID_APPWIDGET_ID && liveIds.contains(appWidgetId)) {
                 val repo = CardRepository(context)
                 val cards = repo.cards.value
                 if (cards.isNotEmpty()) {
@@ -45,7 +51,6 @@ class CardWidgetProvider : AppWidgetProvider() {
                     val currentIndex = cards.indexOfFirst { it.id == currentId }
                     val nextIndex = (currentIndex + 1) % cards.size
                     saveCardId(context, appWidgetId, cards[nextIndex].id)
-                    val manager = AppWidgetManager.getInstance(context)
                     updateAppWidget(context, manager, appWidgetId)
                 }
             }
@@ -244,6 +249,25 @@ class CardWidgetProvider : AppWidgetProvider() {
 
             views.setImageViewBitmap(R.id.widget_btn_next, null)
 
+            // Respect the app lock: never render card codes on the home-screen
+            // widget when the user has enabled the app lock. The widget is
+            // outside the locked app process and would otherwise bypass it.
+            val lockEnabled = try { Prefs(context).lockEnabled } catch (_: Exception) { false }
+            if (lockEnabled) {
+                views.setViewVisibility(R.id.widget_code_image, View.GONE)
+                views.setViewVisibility(R.id.widget_code_text_image, View.GONE)
+                views.setImageViewBitmap(R.id.widget_empty_image, createEmptyStateBitmap(context))
+                views.setViewVisibility(R.id.widget_empty_image, View.VISIBLE)
+                val launchIntent = Intent(context, MainActivity::class.java)
+                val pending = PendingIntent.getActivity(
+                    context, appWidgetId, launchIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                views.setOnClickPendingIntent(R.id.widget_root, pending)
+                appWidgetManager.updateAppWidget(appWidgetId, views)
+                return
+            }
+
             // Generate code preview bitmap
             if (card.code.isNotBlank()) {
                 val is2D = card.format.is2D
@@ -262,7 +286,9 @@ class CardWidgetProvider : AppWidgetProvider() {
 
                 if (!is2D && card.code.isNotBlank()) {
                     views.setImageViewBitmap(R.id.widget_code_text_image, createCodeTextBitmap(context, card.code))
-                    views.setContentDescription(R.id.widget_code_text_image, card.code)
+                    // Never put the raw code in a content description — TalkBack
+                    // would read a sensitive card number aloud / log it.
+                    views.setContentDescription(R.id.widget_code_text_image, "Card code")
                     views.setViewVisibility(R.id.widget_code_text_image, View.VISIBLE)
                 } else {
                     views.setViewVisibility(R.id.widget_code_text_image, View.GONE)

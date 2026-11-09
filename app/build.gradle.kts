@@ -18,8 +18,8 @@ android {
     applicationId = "com.shrivatsav.cardamom"
     minSdk = 30
     targetSdk = 37
-    versionCode = 4
-    versionName = "1.0.3"
+    versionCode = 6
+    versionName = "1.0.5"
   }
   flavorDimensions += "distribution"
   productFlavors {
@@ -37,18 +37,26 @@ android {
     abi {
       isEnable = enableSplits
       reset()
-      include("arm64-v8a", "armeabi-v7a", "x86_64")
-      isUniversalApk = false
+      include("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+      isUniversalApk = true
     }
   }
 
   signingConfigs {
     create("release") {
-      val storeFilePath = keystoreProperties.getProperty("storeFile") ?: "cardamom-release.jks"
+      val storeFilePath = System.getenv("KEYSTORE_FILE")
+        ?: keystoreProperties.getProperty("storeFile")
+        ?: "cardamom-release.jks"
       storeFile = project.file(storeFilePath)
-      storePassword = keystoreProperties.getProperty("storePassword") ?: ""
-      keyAlias = keystoreProperties.getProperty("keyAlias") ?: "cardamom"
-      keyPassword = keystoreProperties.getProperty("keyPassword") ?: ""
+      storePassword = System.getenv("KEYSTORE_PASSWORD")
+        ?: keystoreProperties.getProperty("storePassword")
+        ?: ""
+      keyAlias = System.getenv("KEY_ALIAS")
+        ?: keystoreProperties.getProperty("keyAlias")
+        ?: "cardamom"
+      keyPassword = System.getenv("KEY_PASSWORD")
+        ?: keystoreProperties.getProperty("keyPassword")
+        ?: ""
       enableV1Signing = true
       enableV2Signing = true
     }
@@ -71,6 +79,10 @@ android {
     aidl = false
     buildConfig = false
     shaders = false
+  }
+
+  testOptions {
+    unitTests.isReturnDefaultValues = true
   }
 
   packaging {
@@ -105,6 +117,7 @@ dependencies {
 
   // Compose
   implementation(libs.androidx.compose.ui)
+  implementation("androidx.compose.animation:animation")
   implementation(libs.androidx.compose.ui.tooling.preview)
   implementation(libs.androidx.compose.material3)
   // Tooling
@@ -143,11 +156,12 @@ dependencies {
   implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
   implementation("com.google.mlkit:text-recognition-japanese:16.0.1")
   implementation("com.google.mlkit:text-recognition-korean:16.0.1")
-  implementation("com.google.zxing:core:3.5.3")
-  implementation("com.microsoft.onnxruntime:onnxruntime-android:1.19.2")
+  implementation("com.google.zxing:core:3.5.4")
+  // onnxruntime-android removed (see core/vision/build.gradle.kts) — dead dependency, ~140 MB.
 
   implementation("androidx.navigation:navigation-compose:2.8.9")
   implementation("androidx.compose.material:material-icons-core")
   implementation("androidx.compose.material:material-icons-extended")
 
+  "playImplementation"(libs.billing.ktx)
 }

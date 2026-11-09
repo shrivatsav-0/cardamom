@@ -35,7 +35,9 @@ dependencies {
   implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
   implementation("com.google.mlkit:text-recognition-japanese:16.0.1")
   implementation("com.google.mlkit:text-recognition-korean:16.0.1")
-  implementation("com.microsoft.onnxruntime:onnxruntime-android:1.19.2")
+  // NOTE: onnxruntime-android removed — no code references ai.onnxruntime.*
+  // (PaddleOcrEngine delegates to ML Kit). It was ~140 MB (universal APK)
+  // / ~34 MB per ABI of dead weight. Re-add only if a real ONNX session is implemented.
 
   implementation(libs.androidx.core.ktx)
 

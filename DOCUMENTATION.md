@@ -1276,3 +1276,59 @@ README. \* The Android runtime proof of concept can load the exact
 exported package and process sample documents without network access. \*
 No claim of language, handwriting, or document coverage is made without
 evaluation evidence.
+
+------------------------------------------------------------------------
+
+## 13. Multi-Channel Distribution & Build Pipeline (Play Store vs. GitHub)
+
+Cardamom provides two distinct distribution flavors configured via Gradle product flavors (`distribution` dimension):
+
+### 13.1 Flavor Comparison Matrix
+
+| Capability / Attribute | `github` Flavor (FOSS / Direct) | `play` Flavor (Google Play Store) |
+| :--- | :--- | :--- |
+| **Target Distribution** | GitHub Releases, F-Droid, Direct APK | Google Play Store (`.aab` App Bundle) |
+| **Billing Library** | **None** (completely excluded from compilation) | `com.android.billingclient:billing-ktx` |
+| **Permissions** | Camera, Internet | Camera, Internet, `com.android.vending.BILLING` |
+| **Trial / Paywall Logic** | **None** (100% free and unlocked by default) | 7-day trial with rollback-safe clock tracking |
+| **In-App Purchase UI** | **None** (zero plans, zero pricing, zero tiers) | Paywall lock screen, Trial banners, Pro badge |
+| **Onboarding Flow** | 6 steps (Trial intro omitted) | 7 steps (Includes Trial Intro screen) |
+| **Settings UI** | Open source notice only, zero licensing rows | "Cardamom Pro" management and restoration rows |
+| **Build Artifacts** | Split APKs (`arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86`, `universal`) | Signed Play App Bundle (`.aab`) + Release APK |
+
+### 13.2 Source Set Architecture & Decoupling
+
+Code separation is implemented via Gradle flavor source sets:
+* **Common Code (`app/src/main/`)**: Defines `LicenseState` and delegates distribution-specific UI and controllers to `DistributionBridge`.
+* **Play Source Set (`app/src/play/`)**:
+  - `DistributionBridge.kt`: Injects `PlayDistributionController`, `TrialManager`, `BillingManager`, and Compose UI (Trial banners, Paywall screens).
+  - `Licensing.kt` & `ScreensLicensing.kt`: Full implementation of Google Play Billing and trial expiration flows.
+  - `AndroidManifest.xml`: Declares `com.android.vending.BILLING` and Google Play Store queries.
+* **GitHub Source Set (`app/src/github/`)**:
+  - `DistributionBridge.kt`: Injects `GithubDistributionController` with permanent `LicenseState.Premium`, no-op functions, and empty Composable slots.
+  - Zero billing dependencies and zero payment UI.
+
+### 13.3 Build Scripts & Packaging
+
+Two unified build automation scripts are provided:
+* **PowerShell (`build_artifacts.ps1`)**: Local Windows build runner and CI pipeline support.
+* **Bash (`build_artifacts.sh`)**: Local Unix/Linux/macOS runner and GitHub Actions CI runner.
+
+Both scripts support:
+* Automated unit testing across all modules (`:core:*` and `:app:*`).
+* Semantic versioning management and release note validation.
+* Split APK assembly with per-ABI SHA-256 generation (`SHA256SUMS.txt`, `update.json`, `github_release_notes.md`).
+* Google Play App Bundle packaging (`bundlePlayRelease`).
+* Direct Play Store upload via Android Publisher API (`scripts/upload_playstore.ps1` and `scripts/upload_playstore.py`).
+
+### 13.4 Continuous Integration & Deployment (GitHub Actions)
+
+Workflow file: `.github/workflows/build-and-release.yml`
+* **Trigger**: Git tags matching `v*` or manual `workflow_dispatch`.
+* **Pipeline Jobs**:
+  1. `validate-and-test`: Executes unit tests for both `github` and `play` variants.
+  2. `build-and-release`:
+     - Restores Keystore from `KEYSTORE_BASE64` secret.
+     - Builds GitHub Split APKs and publishes to GitHub Releases (`softprops/action-gh-release@v2`).
+     - Builds Play Store AAB and uploads to Google Play Console (`r0adkll/upload-google-play@v1`) using `PLAY_STORE_JSON_KEY`.
+

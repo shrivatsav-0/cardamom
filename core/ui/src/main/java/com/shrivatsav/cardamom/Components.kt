@@ -4,6 +4,11 @@ import android.content.Context
 import androidx.compose.ui.platform.LocalContext
 import android.graphics.BitmapFactory
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.*
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -80,13 +85,25 @@ fun Choice(
     val unselBg = Color.Transparent
     val selText = if (LocalCardamomPalette.current.isDark) Color(0xFF161616) else Color(0xFFFBF3E4)
     val unselText = C.Muted
+    // Animate the pill background + label color when selection changes
+    // instead of snapping, so tab switches feel continuous.
+    val animatedBg by animateColorAsState(
+        targetValue = if (selected) selColor else unselBg,
+        animationSpec = tween(280, easing = FastOutSlowInEasing),
+        label = "choiceBg",
+    )
+    val animatedText by animateColorAsState(
+        targetValue = if (selected) selText else unselText,
+        animationSpec = tween(280, easing = FastOutSlowInEasing),
+        label = "choiceText",
+    )
     Box(
         modifier.height(48.dp).clip(RoundedCornerShape(24.dp))
-            .background(if (selected) selColor else unselBg).clickable(onClick = onClick),
+            .background(animatedBg).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text, color = if (selected) selText else unselText, fontSize = 16.sp, maxLines = 1, softWrap = false,
+            text, color = animatedText, fontSize = 16.sp, maxLines = 1, softWrap = false,
             fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
         )
     }
@@ -221,7 +238,7 @@ fun FieldEditModal(
 
 @Composable
 fun CircleIcon(icon: ImageVector, desc: String, onClick: () -> Unit) {
-    Box(Modifier.size(44.dp).clip(CircleShape).background(C.Surface).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(48.dp).clip(CircleShape).background(C.Surface).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
         Icon(icon, desc, tint = C.Cream)
     }
 }
@@ -434,6 +451,62 @@ fun BusyOverlay(text: String) {
     }
 }
 
+/**
+ * App-themed Snackbar host matching Cardamom UI: Surface card (20dp radius,
+ * outline border), Cream message text, Yellow action — instead of the
+ * default grey Material pill. Slide+fade entrance comes from SnackbarHost's
+ * built-in transitions.
+ */
+@Composable
+fun CardamomSnackbarHost(
+    hostState: SnackbarHostState,
+    modifier: Modifier = Modifier,
+) {
+    SnackbarHost(
+        hostState = hostState,
+        modifier = modifier,
+        snackbar = { data ->
+            Row(
+                modifier = Modifier
+                    .shadow(12.dp, RoundedCornerShape(20.dp))
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(C.Surface)
+                    .border(1.dp, C.Outline.copy(alpha = 0.6f), RoundedCornerShape(20.dp))
+                    .padding(horizontal = 18.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = data.visuals.message,
+                    color = C.Cream,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f),
+                )
+                val actionLabel = data.visuals.actionLabel
+                if (actionLabel != null) {
+                    Spacer(Modifier.width(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(C.Yellow)
+                            .clickable { data.performAction() }
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = actionLabel,
+                            color = Color(0xFF161616),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        },
+    )
+}
+
 // ---------- brand & drawing ----------
 
 @Composable
@@ -506,7 +579,7 @@ fun Illustration(seed: Int, modifier: Modifier = Modifier) {
 @Composable
 fun LogoView(card: WalletCard, size: Dp = 44.dp) {
     val path = when (card.logoMode) { LogoMode.IMAGE -> card.customPath; LogoMode.AUTO -> card.logoPath; else -> null }
-    val bmp = remember(path) { path?.let { BitmapFactory.decodeFile(it)?.asImageBitmap() } }
+    val bmp = remember(path) { path?.let { VaultCrypto.decodeBitmapPath(it)?.asImageBitmap() } }
     Box(
         Modifier.size(size).clip(CircleShape).background(if (bmp != null) Color.White else C.Ink),
         contentAlignment = Alignment.Center,
@@ -529,7 +602,7 @@ fun UserAvatar(
     val bmp = remember(avatarPath) {
         if (!avatarPath.isNullOrBlank()) {
             val f = java.io.File(avatarPath)
-            if (f.exists()) BitmapFactory.decodeFile(f.absolutePath) else null
+            if (f.exists()) VaultCrypto.decodeBitmapFile(f) else null
         } else null
     }
 

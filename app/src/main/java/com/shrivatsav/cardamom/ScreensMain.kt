@@ -24,9 +24,18 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.core.Camera
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.*
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -59,6 +68,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import kotlinx.coroutines.launch
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -90,6 +102,8 @@ fun WalletScreen(
 ) {
     val ctx = LocalContext.current
     val haptic = LocalHapticFeedback.current
+    val snackbarHostState = remember { SnackbarHostState() }
+    val snackbarScope = rememberCoroutineScope()
     val cards by vm.cards.collectAsState()
     val documents by vm.documents.collectAsState()
     val selectedTab = vm.homeTab
@@ -164,6 +178,8 @@ fun WalletScreen(
                 )
             }
 
+            DistributionBridge.WalletTrialBanner(vm = vm, modifier = Modifier.padding(top = 10.dp, bottom = 4.dp))
+
             Row(
                 Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 16.dp).height(52.dp).clip(RoundedCornerShape(26.dp)).background(C.Surface).padding(horizontal = 18.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -173,19 +189,55 @@ fun WalletScreen(
                 BasicTextField(
                     value = q, onValueChange = { q = it }, singleLine = true,
                     textStyle = TextStyle(color = C.Cream, fontSize = 16.sp, fontFamily = GoogleSansFlexFamily), cursorBrush = SolidColor(C.Yellow),
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .semantics { contentDescription = if (selectedTab == 0) "Search cards" else "Search documents" },
                     decorationBox = { inner ->
-                        if (q.isEmpty()) Text("Search cards", color = C.Muted, fontSize = 16.sp)
+                        if (q.isEmpty()) Text(if (selectedTab == 0) "Search cards" else "Search documents", color = C.Muted, fontSize = 16.sp)
                         inner()
                     },
                 )
+                if (q.isNotEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .clickable { q = "" },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Default.Close, "Clear search", tint = C.Muted, modifier = Modifier.size(20.dp))
+                    }
+                }
             }
 
-            if (selectedTab == 0) {
+            // Animated tab transition: directional slide + fade between
+            // Cards (0) and Documents (1), matching the tap direction.
+            AnimatedContent(
+                targetState = selectedTab,
+                transitionSpec = {
+                    val direction = if (targetState > initialState) 1 else -1
+                    (slideInHorizontally(
+                        initialOffsetX = { fullWidth -> fullWidth / 2 * direction },
+                        animationSpec = tween(320, easing = FastOutSlowInEasing),
+                    ) + fadeIn(tween(220))) togetherWith
+                        (slideOutHorizontally(
+                            targetOffsetX = { fullWidth -> -fullWidth / 2 * direction },
+                            animationSpec = tween(320, easing = FastOutSlowInEasing),
+                        ) + fadeOut(tween(160)))
+                },
+                label = "walletTab",
+            ) { tab ->
+            if (tab == 0) {
+                val pinnedMatches = pinnedCard != null && (q.isBlank() || pinnedCard.name.contains(q, true) || pinnedCard.category.contains(q, true) || pinnedCard.issuer.contains(q, true))
                 if (cards.isEmpty()) {
                     Column(Modifier.fillMaxSize().padding(bottom = 120.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                         Text("No cards yet", fontSize = 22.sp, fontWeight = FontWeight.Medium)
                         Text("Tap Add card to scan your first one.", color = C.Muted, fontSize = 15.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp, start = 16.dp, end = 16.dp))
+                    }
+                } else if (q.isNotBlank() && otherCards.isEmpty() && !pinnedMatches) {
+                    Column(Modifier.fillMaxSize().padding(bottom = 120.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                        Text("No matches", fontSize = 22.sp, fontWeight = FontWeight.Medium)
+                        Text("No cards match \"$q\". Try a different search.", color = C.Muted, fontSize = 15.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp, start = 16.dp, end = 16.dp))
                     }
                 } else {
                     LazyColumn(contentPadding = PaddingValues(bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -209,7 +261,7 @@ fun WalletScreen(
                                         }
                                         Box(
                                             modifier = Modifier
-                                                .size(28.dp)
+                                                .size(48.dp)
                                                 .clip(CircleShape)
                                                 .background(C.Surface)
                                                 .clickable { vm.togglePinCard(pinnedCard.id) },
@@ -260,10 +312,16 @@ fun WalletScreen(
                     }
                 }
             } else {
+                val pinnedDocMatches = pinnedDoc != null && (q.isBlank() || pinnedDoc.title.contains(q, true) || pinnedDoc.docType.contains(q, true) || pinnedDoc.issuer.contains(q, true))
                 if (documents.isEmpty()) {
                     Column(Modifier.fillMaxSize().padding(bottom = 120.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                         Text("No documents yet", fontSize = 22.sp, fontWeight = FontWeight.Medium)
                         Text("Tap Add document to scan or upload an ID, certificate, or receipt.", color = C.Muted, fontSize = 15.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp, start = 16.dp, end = 16.dp))
+                    }
+                } else if (q.isNotBlank() && otherDocs.isEmpty() && !pinnedDocMatches) {
+                    Column(Modifier.fillMaxSize().padding(bottom = 120.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                        Text("No matches", fontSize = 22.sp, fontWeight = FontWeight.Medium)
+                        Text("No documents match \"$q\". Try a different search.", color = C.Muted, fontSize = 15.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp, start = 16.dp, end = 16.dp))
                     }
                 } else {
                     LazyColumn(contentPadding = PaddingValues(bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -287,7 +345,7 @@ fun WalletScreen(
                                         }
                                         Box(
                                             modifier = Modifier
-                                                .size(28.dp)
+                                                .size(48.dp)
                                                 .clip(CircleShape)
                                                 .background(C.Surface)
                                                 .clickable { vm.togglePinDoc(pinnedDoc.id) },
@@ -334,6 +392,7 @@ fun WalletScreen(
                     }
                 }
             }
+            } // end AnimatedContent (wallet tab)
         }
 
         PrimaryButton(
@@ -373,13 +432,17 @@ fun WalletScreen(
             val c = cardToDelete!!
             CardamomConfirmModal(
                 title = "Delete this card?",
-                message = "This card, its barcode, and any stored photos or files will be permanently removed from this phone.",
+                message = "This card, its barcode, and any stored photos or files will be removed. You can undo right after deleting.",
                 confirmText = "Delete card",
                 confirmColor = C.Danger,
                 onConfirm = {
                     val id = c.id
                     cardToDelete = null
                     vm.delete(id)
+                    snackbarScope.launch {
+                        val res = snackbarHostState.showSnackbar("Card deleted", actionLabel = "Undo", duration = SnackbarDuration.Long)
+                        if (res == SnackbarResult.ActionPerformed) vm.undoDeleteCard()
+                    }
                 },
                 onDismiss = { cardToDelete = null },
             )
@@ -420,17 +483,26 @@ fun WalletScreen(
             val d = docToDelete!!
             CardamomConfirmModal(
                 title = "Delete this document?",
-                message = "This document and all its stored pages will be permanently removed from this phone.",
+                message = "This document and all its stored pages will be removed. You can undo right after deleting.",
                 confirmText = "Delete document",
                 confirmColor = C.Danger,
                 onConfirm = {
                     val id = d.id
                     docToDelete = null
                     vm.deleteDoc(id)
+                    snackbarScope.launch {
+                        val res = snackbarHostState.showSnackbar("Document deleted", actionLabel = "Undo", duration = SnackbarDuration.Long)
+                        if (res == SnackbarResult.ActionPerformed) vm.undoDeleteDoc()
+                    }
                 },
                 onDismiss = { docToDelete = null },
             )
         }
+
+        CardamomSnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 96.dp, start = 16.dp, end = 16.dp)
+        )
     }
 }
 
@@ -608,6 +680,9 @@ fun ScanScreen(
     var isCapturing by remember { mutableStateOf(false) }
     var isPortraitCard by remember { mutableStateOf(false) }
     var isLandscapeDoc by remember { mutableStateOf(false) }
+    var showRotationTip by remember { mutableStateOf(true) }
+    var captureFlashAlpha by remember { mutableStateOf(0f) }
+    var lastCapturedPage by remember { mutableStateOf<Int?>(null) }
 
     fun cropCardFrame(): Bitmap? {
         val pv = previewViewRef ?: return null
@@ -688,6 +763,29 @@ fun ScanScreen(
                 },
             )
         }
+        // One-line dismissible rotation tip (orientation is manual).
+        if (showRotationTip) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = if (isDocument) "Tip: rotate phone/document to match the frame — top-right button = horizontal."
+                    else "Tip: rotate phone/card to match the frame — top-right button = portrait badge.",
+                    color = C.Muted,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Box(
+                    modifier = Modifier.size(32.dp).clip(CircleShape).clickable { showRotationTip = false },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Default.Close, "Dismiss tip", tint = C.Muted, modifier = Modifier.size(16.dp))
+                }
+            }
+        }
         Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 12.dp).clip(RoundedCornerShape(28.dp)).background(Color(0xFF0E0E0E))) {
             if (granted) {
                 CameraPreview(
@@ -707,6 +805,36 @@ fun ScanScreen(
                     isLandscapeDoc = isLandscapeDoc,
                     modifier = Modifier.fillMaxSize(),
                 )
+                // Camera-shutter flash on capture (fades out in ~200ms).
+                if (captureFlashAlpha > 0.01f) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.White.copy(alpha = captureFlashAlpha))
+                    )
+                }
+                // "Page N captured" confirmation pill over the preview.
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = lastCapturedPage != null && isDocument,
+                    enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.slideInVertically { it / 2 },
+                    exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.slideOutVertically { it / 2 },
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(Color(0xFF2E7D32))
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "Page ${lastCapturedPage} captured",
+                            color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
             } else {
                 Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                     Text("Camera access is needed to scan", textAlign = TextAlign.Center, fontSize = 17.sp)
@@ -721,73 +849,107 @@ fun ScanScreen(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                // Top: Full-width Capture Button
-                Button(
-                    onClick = {
-                        isCapturing = true
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        val b = cropCardFrame()
-                        if (b != null) {
-                            docPages.add(b)
+                // Captured-pages filmstrip: numbered thumbnails you can delete.
+                // This replaces the old passive "N pages captured" counter box —
+                // you can SEE what was captured and remove a bad page.
+                androidx.compose.animation.AnimatedVisibility(visible = docPages.isNotEmpty()) {
+                    androidx.compose.foundation.lazy.LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp),
+                        modifier = Modifier.fillMaxWidth().height(72.dp),
+                    ) {
+                        itemsIndexed(docPages, key = { index, _ -> index }) { index, bmp ->
+                            Box(
+                                modifier = Modifier
+                                    .size(width = 56.dp, height = 68.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(C.Surface)
+                                    .border(1.dp, C.Outline.copy(alpha = 0.5f), RoundedCornerShape(12.dp)),
+                            ) {
+                                androidx.compose.foundation.Image(
+                                    bitmap = bmp.asImageBitmap(),
+                                    contentDescription = "Captured page ${index + 1}",
+                                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)),
+                                    contentScale = ContentScale.Crop,
+                                )
+                                // Page number badge
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopStart)
+                                        .padding(4.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(C.Yellow)
+                                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        "${index + 1}",
+                                        color = Color(0xFF161616),
+                                        fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                                    )
+                                }
+                                // Delete this page
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(4.dp)
+                                        .size(24.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xCC000000))
+                                        .clickable { docPages.removeAt(index) },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(Icons.Default.Close, "Delete page ${index + 1}", tint = Color.White, modifier = Modifier.size(14.dp))
+                                }
+                            }
                         }
-                        isCapturing = false
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    shape = RoundedCornerShape(20.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = C.Yellow),
-                    enabled = !isCapturing,
-                ) {
-                    Icon(
-                        Icons.Default.CameraAlt,
-                        contentDescription = null,
-                        tint = Color(0xFF161616),
-                        modifier = Modifier.size(22.dp),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = if (docPages.isEmpty()) "Capture Page 1" else "Capture Page ${docPages.size + 1}",
-                        color = Color(0xFF161616),
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
+                    }
                 }
 
-                // Bottom: [ Count ] on left, [ Done ] on right
+                // Shutter (dominant) + Done (label carries the count).
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    // Left: Page Count Box
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(52.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(C.Surface)
-                            .border(1.dp, C.Outline.copy(alpha = 0.5f), RoundedCornerShape(20.dp)),
-                        contentAlignment = Alignment.Center,
+                    Button(
+                        onClick = {
+                            isCapturing = true
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            val b = cropCardFrame()
+                            if (b != null) {
+                                docPages.add(b)
+                                lastCapturedPage = docPages.size
+                                captureFlashAlpha = 0.85f
+                                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+                                    kotlinx.coroutines.delay(90)
+                                    captureFlashAlpha = 0f
+                                    kotlinx.coroutines.delay(1100)
+                                    lastCapturedPage = null
+                                }
+                            }
+                            isCapturing = false
+                        },
+                        modifier = Modifier.weight(1.35f).height(56.dp),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = C.Yellow),
+                        enabled = !isCapturing,
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "${docPages.size}",
-                                color = if (docPages.isNotEmpty()) C.Yellow else C.Muted,
-                                fontSize = 17.sp,
-                                fontWeight = FontWeight.Bold,
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                text = if (docPages.size == 1) "page captured" else "pages captured",
-                                color = C.Muted,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium,
-                            )
-                        }
+                        Icon(
+                            Icons.Default.CameraAlt,
+                            contentDescription = null,
+                            tint = Color(0xFF161616),
+                            modifier = Modifier.size(22.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = if (docPages.isEmpty()) "Capture" else "Capture next",
+                            color = Color(0xFF161616),
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
                     }
 
-                    // Right: Done Button
                     Button(
                         onClick = {
                             if (docPages.isNotEmpty()) {
@@ -795,10 +957,7 @@ fun ScanScreen(
                                 vm.importDocumentPages(docPages.toList(), onDone = onImported)
                             }
                         },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(52.dp)
-                            .clip(RoundedCornerShape(20.dp)),
+                        modifier = Modifier.weight(1f).height(56.dp),
                         shape = RoundedCornerShape(20.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (docPages.isNotEmpty()) Color(0xFF2E7D32) else C.Surface,
@@ -814,13 +973,22 @@ fun ScanScreen(
                         )
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            text = "Done",
+                            text = if (docPages.isEmpty()) "Done" else "Done · ${docPages.size} ${if (docPages.size == 1) "page" else "pages"}",
                             color = if (docPages.isNotEmpty()) Color.White else C.Muted.copy(alpha = 0.4f),
-                            fontSize = 16.sp,
+                            fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
+                            maxLines = 1,
                         )
                     }
                 }
+                Text(
+                    text = if (docPages.isEmpty()) "Capture a page to begin — thumbnails appear above."
+                    else "Tap × on a thumbnail to remove a page. Done saves all pages as one document.",
+                    color = C.Muted,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         } else if (step == 1) {
             PrimaryButton("Capture Front", onClick = {
@@ -835,7 +1003,17 @@ fun ScanScreen(
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 SecondaryButton("Photo", onClick = { vm.external(); photo.launch("image/*") }, modifier = Modifier.weight(1f))
-                SecondaryButton("PDF or file", onClick = { vm.external(); file.launch(arrayOf("application/pdf", "image/*")) }, modifier = Modifier.weight(1f))
+                SecondaryButton("PDF or file", onClick = {
+                    vm.external()
+                    file.launch(arrayOf(
+                        "application/pdf",
+                        "application/msword",
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        "text/plain",
+                        "image/*",
+                        "*/*"
+                    ))
+                }, modifier = Modifier.weight(1f))
             }
         } else {
             PrimaryButton("Capture Back", onClick = {

@@ -36,6 +36,7 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit, onBackup: () -> Unit) {
     var privacyModal by remember { mutableStateOf(false) }
     var termsModal by remember { mutableStateOf(false) }
     var donationModal by remember { mutableStateOf(false) }
+    var wipeConfirm by remember { mutableStateOf(false) }
     val aiStatus by vm.aiModelStatus.collectAsState()
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
@@ -63,7 +64,28 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit, onBackup: () -> Unit) {
             )
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f).clickable { newName = vm.userName; renameDialog = true }) {
-                Text(vm.userName, fontSize = 19.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(vm.userName, fontSize = 19.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                    // PRO badge only in Play build. GitHub build reports Premium
+                    // by design (everything unlocked, no purchase), so PRO there
+                    // would be misleading.
+                    if (DistributionBridge.isPlayDistribution && vm.licenseState is LicenseState.Premium) {
+                        Spacer(Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(C.Yellow)
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "PRO",
+                                color = C.StaticInk,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+                }
                 Text(
                     if (vm.userAvatarPath != null) "Tap photo to change" else "Tap photo to add avatar",
                     color = C.Muted,
@@ -76,6 +98,7 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit, onBackup: () -> Unit) {
                 modifier = Modifier.clickable { newName = vm.userName; renameDialog = true },
             )
         }
+        DistributionBridge.SettingsLicensingHeader(vm = vm)
         GroupTitle("Security")
         Group {
             Row2("App lock") {
@@ -91,6 +114,19 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit, onBackup: () -> Unit) {
             Sep()
             Row2("Block screenshots & recents") {
                 AppSwitch(vm.screenSecurity) { vm.updateScreenSecurity(it) }
+            }
+            Sep()
+            Row2("Encrypt stored files", onClick = {
+                // One-time migration: encrypt legacy plaintext images/docs at rest.
+                // Safe to run repeatedly; already-encrypted files are skipped.
+                val migrated = try { VaultCrypto.migrateDir(ctx.filesDir) } catch (_: Exception) { -1 }
+                Toast.makeText(
+                    ctx,
+                    if (migrated >= 0) "Encrypted $migrated file(s) at rest" else "Encryption unavailable on this device",
+                    Toast.LENGTH_LONG
+                ).show()
+            }) {
+                MutedText("Run now")
             }
         }
         GroupTitle("Appearance")
@@ -181,6 +217,7 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit, onBackup: () -> Unit) {
                 },
             )
         }
+        DistributionBridge.SettingsLicensingSection(vm = vm)
         GroupTitle("Support & Donations")
         Group {
             SettingLinkRow(
@@ -198,7 +235,29 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit, onBackup: () -> Unit) {
             Sep()
             Row2("Cardamom", onClick = {}) { MutedText("Version 1.0 · Offline First") }
         }
+        GroupTitle("Danger Zone")
+        Group {
+            Row2("Wipe all data", onClick = { wipeConfirm = true }) {
+                Text("Delete everything", color = C.Danger, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
         Spacer(Modifier.height(24.dp))
+    }
+
+    if (wipeConfirm) {
+        CardamomConfirmModal(
+            title = "Wipe all data?",
+            message = "This permanently deletes ALL cards, documents, photos and settings from this phone. This cannot be undone. Export a backup first if you need it.",
+            confirmText = "Wipe everything",
+            confirmColor = C.Danger,
+            onConfirm = {
+                wipeConfirm = false
+                vm.wipeAllData()
+                Toast.makeText(ctx, "All data wiped", Toast.LENGTH_LONG).show()
+                onBack()
+            },
+            onDismiss = { wipeConfirm = false },
+        )
     }
 
     if (renameDialog) {
@@ -538,6 +597,7 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit, onBackup: () -> Unit) {
 fun BackupScreen(vm: AppViewModel, onBack: () -> Unit) {
     val ctx = LocalContext.current
     val cards by vm.cards.collectAsState()
+    val documents by vm.documents.collectAsState()
     var protect by remember { mutableStateOf(true) }
     var exportDialog by remember { mutableStateOf(false) }
     var importBytes by remember { mutableStateOf<ByteArray?>(null) }
@@ -547,7 +607,7 @@ fun BackupScreen(vm: AppViewModel, onBack: () -> Unit) {
     val create = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         if (uri != null) {
             try {
-                val plain = Backup.build(cards)
+                val plain = Backup.build(cards, documents)
                 val bytes = pendingPass?.let { Backup.encrypt(plain, it) } ?: plain
                 ctx.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
                 vm.markBackup()
@@ -563,7 +623,9 @@ fun BackupScreen(vm: AppViewModel, onBack: () -> Unit) {
         try {
             val plain = if (Backup.isEncrypted(bytes)) Backup.decrypt(bytes, pass ?: CharArray(0)) else bytes
             val n = vm.importCards(Backup.parse(plain))
-            Toast.makeText(ctx, "Imported $n card(s)", Toast.LENGTH_SHORT).show()
+            val docs = Backup.parseDocuments(plain)
+            val m = vm.importDocuments(docs)
+            Toast.makeText(ctx, "Imported $n card(s) and $m document(s) (metadata only — re-scan for page images)", Toast.LENGTH_LONG).show()
             importBytes = null
         } catch (e: Exception) {
             Toast.makeText(ctx, "Couldn't read that file. Wrong password?", Toast.LENGTH_LONG).show()
@@ -572,7 +634,16 @@ fun BackupScreen(vm: AppViewModel, onBack: () -> Unit) {
 
     val open = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            val bytes = try {
+                ctx.contentResolver.openInputStream(uri)?.use { input ->
+                    val out = java.io.ByteArrayOutputStream()
+                    Files.copyBounded(input, out, max = 20_000_000L)
+                    out.toByteArray()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(ctx, "Backup file too large", Toast.LENGTH_LONG).show()
+                null
+            }
             if (bytes != null) {
                 if (Backup.isEncrypted(bytes)) { password = ""; importBytes = bytes } else finishImport(bytes, null)
             }
@@ -592,7 +663,7 @@ fun BackupScreen(vm: AppViewModel, onBack: () -> Unit) {
         Spacer(Modifier.height(14.dp))
         ToggleRow("Protect with a password", "Encrypts the file", protect) { protect = it }
         Text(
-            "Backups hold card details only. Original files and logos stay on this phone. Nothing leaves your phone unless you send it.",
+            "Backups hold card and document details (metadata + extracted fields). Original files, page images and logos stay on this phone and must be re-scanned after a restore. Nothing leaves your phone unless you send it.",
             color = C.Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 14.dp),
         )
         Spacer(Modifier.weight(1f))
@@ -608,7 +679,7 @@ fun BackupScreen(vm: AppViewModel, onBack: () -> Unit) {
         CardamomModal(
             onDismiss = { exportDialog = false },
             title = "Set backup password",
-            subtitle = "Choose a password with at least 4 characters to encrypt your backup",
+            subtitle = "Choose a password with at least 12 characters to encrypt your backup",
         ) {
             CField("Password", password, { password = it }, keyboard = KeyboardType.Password)
             Spacer(Modifier.height(20.dp))
@@ -620,7 +691,7 @@ fun BackupScreen(vm: AppViewModel, onBack: () -> Unit) {
                     vm.external()
                     create.launch("cardamom-backup.cardamom")
                 },
-                enabled = password.length >= 4,
+                enabled = password.length >= 12,
             )
             Spacer(Modifier.height(8.dp))
         }

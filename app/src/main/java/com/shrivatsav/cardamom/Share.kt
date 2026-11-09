@@ -587,7 +587,17 @@ object Share {
 
     fun openOriginal(ctx: Context, c: WalletCard) {
         val p = c.originalPath ?: return
-        val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", File(p))
+        // Vault originals are encrypted at rest: decrypt to a private cache
+        // temp file for the external viewer (cache/shared is FileProvider-covered).
+        val shareFile = try {
+            val src = File(p)
+            if (VaultCrypto.isEncryptedFile(src)) {
+                val tmp = File(shareDir(ctx), "open_${System.nanoTime()}_${src.name}")
+                tmp.writeBytes(VaultCrypto.readDecryptedBytes(src))
+                tmp
+            } else src
+        } catch (_: Exception) { File(p) }
+        val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", shareFile)
         val i = Intent(Intent.ACTION_VIEW).setDataAndType(uri, c.originalMime ?: "*/*").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         try { ctx.startActivity(i) } catch (e: Exception) { Toast.makeText(ctx, "No app can open this file", Toast.LENGTH_SHORT).show() }
     }
