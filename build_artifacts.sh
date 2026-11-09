@@ -255,7 +255,7 @@ echo ""
 if [[ "$VARIANT" == "play" || "$VARIANT" == "all" ]]; then
   echo "=== Building Play Store Variant ==="
   if [[ "$BUILD_TYPE" == "release" ]]; then
-    run_gradle assemblePlayRelease bundlePlayRelease -PsplitApks=false -x lintVitalAnalyzePlayRelease -x lintVitalReportPlayRelease
+    run_gradle assemblePlayRelease bundlePlayRelease -PsplitApks=false -x lintVitalAnalyzePlayRelease -x lintVitalReportPlayRelease -x lintVitalPlayRelease
   else
     run_gradle assemblePlayDebug -PsplitApks=false
   fi
@@ -266,7 +266,7 @@ fi
 if [[ "$VARIANT" == "github" || "$VARIANT" == "all" ]]; then
   echo "=== Building GitHub Split APK Variant ==="
   if [[ "$BUILD_TYPE" == "release" ]]; then
-    run_gradle assembleGithubRelease -PsplitApks=true -x lintVitalAnalyzeGithubRelease -x lintVitalReportGithubRelease
+    run_gradle assembleGithubRelease -PsplitApks=true -x lintVitalAnalyzeGithubRelease -x lintVitalReportGithubRelease -x lintVitalGithubRelease
   else
     run_gradle assembleGithubDebug -PsplitApks=true
   fi

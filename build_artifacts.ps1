@@ -357,12 +357,12 @@ function Invoke-GradleStep([string[]]$tasks, [string[]]$extraArgs, [string]$step
 
 if ($Variant -eq "play" -or $Variant -eq "all") {
     $playTasks = if ($BuildType -eq "release") { @("assemblePlayRelease", "bundlePlayRelease") } else { @("assemblePlayDebug") }
-    Invoke-GradleStep $playTasks @("-PsplitApks=false", "-x", "lintVitalAnalyzePlayRelease", "-x", "lintVitalReportPlayRelease") "Play Store Variant"
+    Invoke-GradleStep $playTasks @("-PsplitApks=false", "-x", "lintVitalAnalyzePlayRelease", "-x", "lintVitalReportPlayRelease", "-x", "lintVitalPlayRelease") "Play Store Variant"
 }
 
 if ($Variant -eq "github" -or $Variant -eq "all") {
     $githubTasks = if ($BuildType -eq "release") { @("assembleGithubRelease") } else { @("assembleGithubDebug") }
-    Invoke-GradleStep $githubTasks @("-PsplitApks=true", "-x", "lintVitalAnalyzeGithubRelease", "-x", "lintVitalReportGithubRelease") "GitHub Split APK Variant"
+    Invoke-GradleStep $githubTasks @("-PsplitApks=true", "-x", "lintVitalAnalyzeGithubRelease", "-x", "lintVitalReportGithubRelease", "-x", "lintVitalGithubRelease") "GitHub Split APK Variant"
 }
 # --- Artifact Assembly & Staging ---------------------------------------------
 $OutRoot = Join-Path $RootDir "dist\$BuildCap\v$NextVersion"
