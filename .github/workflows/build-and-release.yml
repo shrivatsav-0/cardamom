@@ -81,6 +81,7 @@ jobs:
       PLAY_STATUS: ${{ github.event.inputs.play_status || 'completed' }}
       UPLOAD_PLAY: ${{ github.event_name == 'push' || github.event.inputs.upload_playstore == 'true' }}
       PUBLISH_GH: ${{ github.event_name == 'push' || github.event.inputs.publish_github == 'true' }}
+      PLAY_JSON_KEY_PRESENT: ${{ secrets.PLAY_STORE_JSON_KEY != '' }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -156,7 +157,8 @@ jobs:
           cp playstore_release_notes.txt distribution/whatsnew/whatsnew-en-US
 
       - name: Upload AAB to Google Play Store
-        if: ${{ env.UPLOAD_PLAY == 'true' && (env.BUILD_VARIANT == 'play' || env.BUILD_VARIANT == 'all') && secrets.PLAY_STORE_JSON_KEY != '' }}
+        # NOTE: secrets.* cannot be used directly in `if:` — checked via job env.
+        if: ${{ env.UPLOAD_PLAY == 'true' && (env.BUILD_VARIANT == 'play' || env.BUILD_VARIANT == 'all') && env.PLAY_JSON_KEY_PRESENT == 'true' }}
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_STORE_JSON_KEY }}
